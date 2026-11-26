@@ -21,7 +21,8 @@ modules:
   jira:workflowValidator:
     - key: exhibita-submit-validator
       name: Exhibita evidence complete
-      description: Blocks the transition until every required exhibit for the dispute's reason is backed by evidence. Fails closed.
+      description: Blocks the transition until every required exhibit for the
+        dispute's reason is backed by evidence. Fails closed.
       function: validator-fn
 
   webtrigger:
@@ -46,7 +47,9 @@ modules:
   rovo:agent:
     - key: exhibita-analyst
       name: Exhibita Analyst
-      description: Explains and challenges chargeback defenses using cited evidence from Jira, JSM and Confluence. Never decides; never gives a win percentage.
+      description: Explains and challenges chargeback defenses using cited evidence
+        from Jira, JSM and Confluence. Never decides; never gives a win
+        percentage.
       prompt: resource:agent-prompts;analyst.md
       conversationStarters:
         - Should we fight or accept this dispute?
@@ -61,24 +64,30 @@ modules:
       name: Get dispute context
       function: get-context-fn
       actionVerb: GET
-      description: Returns a dispute's reason, amount, respond-by date and every evidence item (exhibit letter, Fact or Inference, source and timestamp) for a Jira work item key.
+      description: Returns a dispute's reason, amount, respond-by date and every
+        evidence item (exhibit letter, Fact or Inference, source and timestamp)
+        for a Jira work item key.
       inputs:
         issueKey:
           title: Work item key
           type: string
           required: false
-          description: The Jira key of the dispute, for example DSP-12. Defaults to the work item the user is viewing.
+          description: The Jira key of the dispute, for example DSP-12. Defaults to the
+            work item the user is viewing.
     - key: evaluate-rubric
       name: Evaluate dispute rubric
       function: evaluate-fn
       actionVerb: GET
-      description: Runs Exhibita's deterministic reason-code rubric and returns each requirement's status and rule, the evidence coverage, and the fight, accept or investigate recommendation with its reason.
+      description: Runs Exhibita's deterministic reason-code rubric and returns each
+        requirement's status and rule, the evidence coverage, and the fight,
+        accept or investigate recommendation with its reason.
       inputs:
         issueKey:
           title: Work item key
           type: string
           required: false
-          description: The Jira key of the dispute, for example DSP-12. Defaults to the work item the user is viewing.
+          description: The Jira key of the dispute, for example DSP-12. Defaults to the
+            work item the user is viewing.
 
   rovo:mcp:
     - key: exhibita-mcp
@@ -132,7 +141,7 @@ permissions:
 # app.rovo metadata (tag, description, keywords) is required for rovo:mcp apps from 5 Jan 2027,
 # but CLI 16 / @forge/manifest 13.9.1 rejects it. Re-add once the schema accepts it. See docs/BUILD_LOG.md.
 app:
-  id: ari:cloud:ecosystem::app/00000000-0000-0000-0000-000000000000
+  id: ari:cloud:ecosystem::app/0c0185eb-c3c6-4f56-a94d-39c45b26a884
   runtime:
     name: nodejs24.x
     memoryMB: 256
