@@ -25,6 +25,16 @@ modules:
         dispute's reason is backed by evidence. Fails closed.
       function: validator-fn
 
+  # Index the dispute id stored on each work item so JQL can find it (intake idempotency).
+  jira:entityProperty:
+    - key: exhibita-dispute-index
+      entityType: issue
+      propertyKey: exhibita
+      values:
+        - path: dispute.externalId
+          type: string
+          searchAlias: exhibitaDisputeId
+
   webtrigger:
     - key: exhibita-dispute-intake
       function: intake-fn

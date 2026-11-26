@@ -1,6 +1,7 @@
 // Thin, typed wrappers over the Jira REST API. Everything that talks to Jira goes through here.
 
 import api, { route } from '@forge/api';
+import { chooseWorkType, type WorkTypeOption } from '../core/intake/issue-type';
 import { asDisputeRecord, RECORD_PROPERTY_KEY, type DisputeRecord } from '../core/record';
 
 export class JiraError extends Error {
@@ -40,19 +41,91 @@ export async function listProjects(as: Requester = api.asApp()): Promise<Project
   return body.values;
 }
 
-interface IssueTypeSummary {
-  id: string;
-  name: string;
-  subtask: boolean;
+/** Service project templates to try, most fitting first. Sites differ in which ones they offer. */
+export const SERVICE_PROJECT_TEMPLATES = [
+  'com.atlassian.servicedesk:simplified-general-service-desk',
+  'com.atlassian.servicedesk:simplified-it-service-management',
+  'com.atlassian.servicedesk:simplified-internal-service-desk',
+] as const;
+
+/**
+ * Create the Jira Service Management project disputes land in. Runs as the admin who clicked the
+ * button, who becomes the project lead. Tries each template until the site accepts one.
+ */
+export async function createServiceProject(
+  key: string,
+  name: string,
+  as: Requester = api.asUser(),
+): Promise<ProjectSummary & { template: string }> {
+  const me = await json<{ accountId: string }>(await as.requestJira(route`/rest/api/3/myself`), 'Reading the current user');
+  let lastError: unknown = null;
+  for (const template of SERVICE_PROJECT_TEMPLATES) {
+    const res = await as.requestJira(route`/rest/api/3/project`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        key,
+        name,
+        projectTypeKey: 'service_desk',
+        projectTemplateKey: template,
+        leadAccountId: me.accountId,
+        assigneeType: 'UNASSIGNED',
+        description: 'Card disputes, one work item per chargeback. Created by Exhibita.',
+      }),
+    });
+    try {
+      await json<{ id: number; key: string }>(res, `Creating project ${key} from ${template}`);
+      const project = await findProject(key, as);
+      if (!project) throw new Error(`Project ${key} was created but cannot be read back`);
+      return { ...project, template };
+    } catch (error) {
+      lastError = error;
+      // A 400 that names the template means the site doesn't offer it; try the next one.
+      if (!(error instanceof JiraError) || error.status !== 400 || !/template/i.test(error.body)) throw error;
+    }
+  }
+  throw lastError;
 }
 
-/** Prefer an issue type called "Dispute"; otherwise the first standard type in the project. */
-export async function pickIssueType(projectId: string, as: Requester = api.asApp()): Promise<IssueTypeSummary> {
+/**
+ * Put a user in the project's admin and agent roles. Creating a service project through the REST
+ * API makes the caller the lead but not an agent, and JSM hides app panels from non-agents.
+ */
+export async function ensureProjectRoles(
+  key: string,
+  accountId: string,
+  roleNames: readonly string[] = ['Administrators', 'Service Desk Team'],
+  as: Requester = api.asUser(),
+): Promise<string[]> {
+  const roles = await json<Record<string, string>>(await as.requestJira(route`/rest/api/3/project/${key}/role`), `Reading roles of ${key}`);
+  const added: string[] = [];
+  for (const name of roleNames) {
+    const url = roles[name];
+    const id = url?.split('/').pop();
+    if (!id) continue;
+    const role = await json<{ actors?: { actorUser?: { accountId: string } }[] }>(
+      await as.requestJira(route`/rest/api/3/project/${key}/role/${id}`),
+      `Reading role ${name}`,
+    );
+    if (role.actors?.some((a) => a.actorUser?.accountId === accountId)) continue;
+    await json(
+      await as.requestJira(route`/rest/api/3/project/${key}/role/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ user: [accountId] }),
+      }),
+      `Adding the user to ${name}`,
+    );
+    added.push(name);
+  }
+  return added;
+}
+
+/** The standard work type disputes are created as (see chooseWorkType). */
+export async function pickIssueType(projectId: string, as: Requester = api.asApp()): Promise<WorkTypeOption> {
   const res = await as.requestJira(route`/rest/api/3/issuetype/project?projectId=${projectId}`);
-  const types = await json<IssueTypeSummary[]>(res, 'Reading issue types');
-  const standard = types.filter((t) => !t.subtask);
-  const chosen = standard.find((t) => t.name.toLowerCase() === 'dispute') ?? standard[0];
-  if (!chosen) throw new Error(`Project ${projectId} has no standard issue types`);
+  const chosen = chooseWorkType(await json<WorkTypeOption[]>(res, 'Reading issue types'));
+  if (!chosen) throw new Error(`Project ${projectId} has no standard work types`);
   return chosen;
 }
 
@@ -98,7 +171,8 @@ export async function writeDisputeRecord(issueKey: string, record: DisputeRecord
 
 /** Find the work item already created for a processor dispute id, so redelivered webhooks don't duplicate it. */
 export async function findIssueByExternalId(projectKey: string, externalId: string, as: Requester = api.asApp()): Promise<string | null> {
-  const jql = `project = "${projectKey}" AND issue.property[${RECORD_PROPERTY_KEY}].dispute.externalId = "${externalId}"`;
+  const quoted = (v: string) => `"${v.replace(/[\\"]/g, (c) => `\\${c}`)}"`;
+  const jql = `project = ${quoted(projectKey)} AND issue.property[${RECORD_PROPERTY_KEY}].dispute.externalId = ${quoted(externalId)}`;
   const res = await as.requestJira(route`/rest/api/3/search/jql`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },

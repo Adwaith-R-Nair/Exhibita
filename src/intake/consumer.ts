@@ -2,6 +2,7 @@
 // Idempotent on the processor's dispute id, because queues retry and processors redeliver.
 
 import type { AsyncEvent } from '@forge/events';
+import { kvs } from '@forge/kvs';
 import { publishGlobal } from '@forge/realtime';
 import { RECORD_SCHEMA_VERSION, type DisputeRecord } from '../core/record';
 import { findReason } from '../core/rubric/reasons';
@@ -25,7 +26,11 @@ export async function processIntake(event: AsyncEvent): Promise<void> {
   const project = await findProject(config.projectKey);
   if (!project) throw new Error(`Project ${config.projectKey} not found. Set the project on the Exhibita setup page.`);
 
-  const existing = await findIssueByExternalId(config.projectKey, dispute.externalId);
+  // KVS is read-your-writes, so a redelivery minutes later is caught here; JQL is the fallback for
+  // records written before this key existed (the search index can lag by a few seconds).
+  const seenKey = `intake:${dispute.externalId}`;
+  const seen = await kvs.get<{ issueKey: string }>(seenKey);
+  const existing = seen?.issueKey ?? (await findIssueByExternalId(config.projectKey, dispute.externalId));
   if (existing) {
     console.log(`Dispute ${dispute.externalId} already recorded on ${existing}; skipping`);
     return;
@@ -50,6 +55,7 @@ export async function processIntake(event: AsyncEvent): Promise<void> {
 
   const record: DisputeRecord = { schemaVersion: RECORD_SCHEMA_VERSION, dispute, evidence: [], raw, collectedAt: null };
   await writeDisputeRecord(issue.key, record);
+  await kvs.set(seenKey, { issueKey: issue.key });
 
   await publishGlobal(DISPUTE_CREATED_CHANNEL, JSON.stringify({ issueKey: issue.key, externalId: dispute.externalId }));
   console.log(`Created ${issue.key} for dispute ${dispute.externalId}`);
