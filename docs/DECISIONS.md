@@ -81,3 +81,27 @@ Each decision has an ID that commit subjects reference, for example `(D-04)`. A 
 **Context:** Jira assigns issue keys, so the story cannot rely on keys such as INC-231. Service projects made through the REST API need the right template (spike S3, revisited).
 **Decision:** Disputes in a service project (default DSP), support tickets in a second service project (SUP), incidents and deploys in two company-managed software projects (INC, DEP), policies in a Confluence space (EXHPOL), and payment records in Forge SQL. Ticket and incident details that Jira cannot hold natively (original message times, incident windows) are stored as issue properties, and policy effective dates as a page property, because Jira and Confluence timestamps cannot be backdated.
 **Consequence:** The story's keys depend on the site, for example "INC-1 caused by DEP-2". Causes are recorded only as Jira "Causes" links and SQL impact rows.
+
+## D-15: Exhibita keeps its own ledger of the disputes it takes in
+**Date:** 27 Nov 2026
+**Context:** Two deliveries of one dispute could both create a work item, and the list of disputed orders used by Compelling Evidence 3.0 came from issue properties anyone can edit (review round 1).
+**Decision:** Intake claims each processor dispute id with an atomic insert into a SQL `disputes` table before creating anything, then records the work item key. A claim left pending by a crash is taken over after ten minutes. The ledger is the trusted answer to "which orders were disputed" and to "which work items did the demo create".
+**Consequence:** Redeliveries and concurrent deliveries are harmless, removal never needs to select by an editable label, and legacy disputes are still found through the older marker and JQL.
+
+## D-16: Dispute webhooks are signed, not shared-secret
+**Date:** 27 Nov 2026
+**Context:** A static secret in a header can leak into logs and be replayed indefinitely.
+**Decision:** Requests carry a Stripe-style signature: `t=<unix time>,v1=<HMAC-SHA256 of "t.body">` in `x-exhibita-signature` or `stripe-signature`, made with the webhook secret. Requests more than five minutes from the current time are refused.
+**Consequence:** The secret never travels with a request, a captured request cannot be replayed later, and processors that already sign this way work unchanged.
+
+## D-17: Reconcile the merchant's refund records against the processor
+**Date:** 27 Nov 2026
+**Context:** Review round 1 showed the original hero was modelled on the wrong reason (a refund that was promised and never paid is Visa 13.6) and that the Fight-to-Accept flip never appeared. A real and common failure is a refund system that records a refund as sent when the processor never received it.
+**Decision:** Collect the processor's view of refunds (the charge's amount refunded) as its own source, read after the merchant's refund records. When the refund service says completed but the processor shows no refund, the challenge raises a decisive finding that names any explicitly linked incident and deploy. The hero is a $249 Visa 13.6 dispute whose checklist says Fight until that reconciliation flips it to Accept.
+**Consequence:** The flip is genuine and visible live as the settlements source is read. Accepting a cluster must also cancel the stuck refunds for those payments, so no customer is paid twice (planned for the bulk accept in M3).
+
+## D-18: The rubrics are Visa rules, and say so
+**Date:** 27 Nov 2026
+**Context:** Mastercard and other networks have different reason codes, stages and evidence rules. Applying Visa rules to them would give confident wrong answers.
+**Decision:** Every dispute carries its card network from the processor event. Visa disputes are judged and labelled "Judged against Visa dispute rules"; Mastercard, Amex and Discover disputes are marked not supported yet and recommended for review by hand; an unknown network gets Visa rules with a note.
+**Consequence:** Coverage is narrower but every answer the app gives is one it can stand behind. Dispute stages (pre-arbitration, arbitration fees) are recorded as deferred.
