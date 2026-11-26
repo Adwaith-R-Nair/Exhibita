@@ -67,6 +67,30 @@ This is the engineering log for Exhibita, a Forge app for Jira Service Managemen
 
 ---
 
+## M3: the systemic view (27 Nov 2026)
+
+### Built
+- **The Exhibita page** (`jira:globalPage`): disputes grouped under the incident an explicit link names as the cause, with the blast radius (disputes and their cost with fees, customers affected who have not disputed and what they are owed, analyst time) and a "why we lose disputes" card from closed outcomes (counts only, never a prediction). `b06a960`, `94961b6`
+- **Three confirmed actions, planned in tested core code first** (`217a71d`):
+  - Accept the cluster: each dispute is accepted as the user with a comment, and its stuck refund is cancelled only after the chargeback is accepted, so no customer can be paid twice when the refund worker is replayed. A half-finished step is repaired on the next call.
+  - Queue proactive refunds for the customers who have not disputed, in a new `refund_queue` table with one tracking work item. Exhibita never moves money.
+  - File the cost bug on the deploy, linked to it and to the incident.
+- The dispute panel links to the page when an incident is linked as the cause.
+- Removal now deletes demo projects outright instead of trashing them, so their keys stay free for the next set-up (`74b6659`).
+
+### Broke, and how it was found
+- **My own ordering mistake, caught before running:** the first draft cancelled the stuck refund before accepting the dispute. If the transition then failed, the customer would be owed nothing while the dispute stayed open. Reversed: accept first, then cancel, with a repair pass on each call.
+- **Atlassian site maintenance** (found live): mid-removal and mid-setup, Jira answered 403 "Tenant is restricted: migration". A permission check reported this as a refusal and stopped the removal; setup showed the raw error. Checks now retry temporary answers and setup explains the maintenance (`3b36141`). Both runs resumed without losing work, which is what the resumable design was for.
+- Opening the panel once failed with Jira's generic "We couldn't perform the action"; a retry opened it. Platform-side, not reproduced.
+
+### Verified live
+- The page traced INC-1 ("Refund worker marked refunds as sent without sending them") to DEP-1: 38 disputes, $5,492.00 disputed, $6,062.00 with fees, 212 customers not yet disputed owed $30,859.00, about 15.8 analyst hours.
+- Accept: all 38 disputes moved to Accepted with the explanation comment; collecting the hero's evidence again showed REF-1001 as "cancelled because the accepted chargeback settles it".
+- Queue: 212 refunds queued with tracking item SUP-28 linked to INC-1.
+- Cost bug: DEP-4 "DEP-1 has cost $6,062.00 in disputes so far", linked to DEP-1 and INC-1.
+
+---
+
 ## Housekeeping and a clean rebuild (27 Nov 2026)
 
 ### Done
