@@ -6,6 +6,9 @@ import { publishGlobal } from '@forge/realtime';
 import Resolver from '@forge/resolver';
 import { getConfig, rotateWebhookSecret, saveConfig, type AppConfig } from '../lib/config';
 import { createServiceProject, ensureProjectRoles, findProject } from '../lib/jira';
+import { runValidationSuite } from '../core/validation/suite';
+import { removeDemoStep } from '../lib/remove-demo';
+import { runSeedStep, seedProgress, startSeed } from '../lib/seed';
 import { audit, recentAudit, runMigrations } from '../lib/sql';
 
 export const SPIKE_CHANNEL = 'exhibita-platform-check';
@@ -90,6 +93,27 @@ resolver.define('runChecks', async ({ context }) => {
     }),
   ]);
   return { results };
+});
+
+resolver.define('runValidation', async () => runValidationSuite());
+
+resolver.define('seedStatus', async () => seedProgress());
+
+resolver.define('seedStart', async ({ context }) => {
+  await audit(context.accountId ?? 'unknown', 'demo-setup-start', null).catch(() => undefined);
+  return startSeed();
+});
+
+resolver.define('seedStep', async ({ context }) => {
+  const localId = (context as { localId?: string }).localId;
+  if (!context.accountId || !localId) throw new Error('Run demo setup from the Exhibita setup page as a site admin.');
+  return runSeedStep({ accountId: context.accountId, localId });
+});
+
+resolver.define('removeStep', async ({ context }) => {
+  const result = await removeDemoStep();
+  if (result.status === 'done') await audit(context.accountId ?? 'unknown', 'demo-remove', null).catch(() => undefined);
+  return result;
 });
 
 export const adminHandler = resolver.getDefinitions();

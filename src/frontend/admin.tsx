@@ -6,6 +6,7 @@ import ForgeReconciler, {
   Heading,
   Inline,
   Lozenge,
+  ProgressBar,
   SectionMessage,
   Spinner,
   Stack,
@@ -27,6 +28,178 @@ interface CheckResult {
 }
 
 const SPIKE_CHANNEL = 'exhibita-platform-check';
+
+interface SeedProgress {
+  status: 'idle' | 'running' | 'done' | 'failed';
+  step: number;
+  steps: string[];
+  label: string;
+  message: string;
+  notes: string[];
+  error: string | null;
+}
+
+interface ValidationReport {
+  passed: number;
+  total: number;
+  results: { id: number; title: string; expected: string; observed: string; passed: boolean }[];
+}
+
+/** Drives "Set up demo data": one bounded step per call until done or failed. */
+function DemoData() {
+  const [progress, setProgress] = useState<SeedProgress | null>(null);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    call<SeedProgress>('seedStatus').then(setProgress).catch((e: unknown) => setError(String(e)));
+  }, []);
+
+  const go = async () => {
+    setRunning(true);
+    setError(null);
+    try {
+      let p = await call<SeedProgress>('seedStart');
+      setProgress(p);
+      while (p.status === 'running') {
+        p = await call<SeedProgress>('seedStep');
+        setProgress(p);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removeMessage, setRemoveMessage] = useState<string | null>(null);
+
+  const remove = async () => {
+    setConfirmRemove(false);
+    setRunning(true);
+    setError(null);
+    try {
+      let r = await call<{ status: string; message: string }>('removeStep');
+      while (r.status === 'running') {
+        setRemoveMessage(r.message);
+        r = await call<{ status: string; message: string }>('removeStep');
+      }
+      setRemoveMessage(r.message);
+      setProgress(await call<SeedProgress>('seedStatus'));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const total = progress?.steps.length ?? 1;
+  const done = progress?.status === 'done';
+  return (
+    <Stack space="space.100">
+      <Heading size="medium">Demo data</Heading>
+      <Text>
+        Builds a synthetic demo world: the Disputes, Customer support, Incidents and Deploys projects, policy pages in Confluence, orders and
+        payments, and about 60 disputes with their evidence. Takes a few minutes. Keep this page open while it runs.
+      </Text>
+      <Box>
+        <Button appearance="primary" isDisabled={running || done} onClick={go}>
+          {running ? 'Setting up…' : done ? 'Demo data is set up' : progress?.status === 'failed' ? 'Resume demo setup' : 'Set up demo data'}
+        </Button>
+      </Box>
+      {progress && progress.status !== 'idle' && (
+        <Stack space="space.050">
+          <ProgressBar value={done ? 1 : progress.step / total} appearance={done ? 'success' : 'default'} ariaLabel="Demo setup progress" />
+          <Text>
+            {done ? 'Done.' : `Step ${progress.step + 1} of ${total}: ${progress.label}.`} {progress.message}
+          </Text>
+        </Stack>
+      )}
+      {progress?.notes.map((n) => (
+        <SectionMessage key={n} appearance="warning">
+          <Text>{n}</Text>
+        </SectionMessage>
+      ))}
+      {(done || progress?.status === 'failed') && !running && (
+        <Box>
+          {confirmRemove ? (
+            <SectionMessage appearance="warning" title="Remove all demo data?">
+              <Text>
+                Moves the demo projects and the policy space to the trash (an admin can restore them for 60 days), deletes demo disputes, and
+                empties the demo tables.
+              </Text>
+              <Inline space="space.100">
+                <Button appearance="danger" onClick={remove}>
+                  Remove demo data
+                </Button>
+                <Button appearance="subtle" onClick={() => setConfirmRemove(false)}>
+                  Cancel
+                </Button>
+              </Inline>
+            </SectionMessage>
+          ) : (
+            <Button appearance="subtle" onClick={() => setConfirmRemove(true)}>
+              Remove demo data
+            </Button>
+          )}
+        </Box>
+      )}
+      {removeMessage && (
+        <SectionMessage appearance="success">
+          <Text>{removeMessage}</Text>
+        </SectionMessage>
+      )}
+      {(progress?.error || error) && (
+        <SectionMessage appearance="error" title="Demo setup stopped">
+          <Text>{progress?.error ?? error}</Text>
+          <Text>Everything done so far is kept. Fix the cause, then resume.</Text>
+        </SectionMessage>
+      )}
+    </Stack>
+  );
+}
+
+function ValidationSuite() {
+  const [report, setReport] = useState<ValidationReport | null>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <Stack space="space.100">
+      <Heading size="medium">Validation suite</Heading>
+      <Text>Ten synthetic disputes, each checking one behaviour of the decision engine. The same cases run in the app's automated tests.</Text>
+      <Box>
+        <Button
+          isDisabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              setReport(await call<ValidationReport>('runValidation'));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? 'Running…' : 'Run validation suite'}
+        </Button>
+      </Box>
+      {report && (
+        <Stack space="space.075">
+          <Text weight="bold">
+            {report.passed} of {report.total} passed
+          </Text>
+          {report.results.map((r) => (
+            <Inline key={r.id} space="space.100" alignBlock="center">
+              <Lozenge appearance={r.passed ? 'success' : 'removed'}>{r.passed ? 'Pass' : 'Fail'}</Lozenge>
+              <Text>
+                {r.id}. {r.title}: {r.observed}
+              </Text>
+            </Inline>
+          ))}
+        </Stack>
+      )}
+    </Stack>
+  );
+}
 
 function App() {
   const [setup, setSetup] = useState<Setup | null>(null);
@@ -73,6 +246,10 @@ function App() {
           <Text>{error}</Text>
         </SectionMessage>
       )}
+
+      <DemoData />
+
+      <ValidationSuite />
 
       <Stack space="space.100">
         <Heading size="medium">Disputes project</Heading>

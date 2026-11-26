@@ -14,7 +14,8 @@ export class JiraError extends Error {
   }
 }
 
-type Requester = ReturnType<typeof api.asApp>;
+// asApp and asUser both provide requestJira, which is all these wrappers use.
+type Requester = Pick<ReturnType<typeof api.asApp>, 'requestJira'>;
 
 async function json<T>(res: Awaited<ReturnType<Requester['requestJira']>>, what: string): Promise<T> {
   const text = await res.text();
