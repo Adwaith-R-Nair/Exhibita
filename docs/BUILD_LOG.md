@@ -7,7 +7,7 @@ Notable progress, surprises and lessons, newest first.
 - Two build fixes before the first deploy: Forge's ts-loader emits nothing under `noEmit`, and its webpack config does not resolve `.js` import paths to `.ts`, so imports are now extensionless.
 - The setup page was stuck loading because the ISP's DNS refused Forge's CDN hosts. Public DNS fixed it. Worth knowing for the demo recording.
 - The live run caught two intake bugs the unit tests could not: disputes became Epics, and a redelivered webhook made a duplicate (JQL cannot search an issue property until `jira:entityProperty` indexes it). Both fixed, with a KVS marker for read-your-writes deduplication.
-- Surprise: a service project created through the REST API is a shell (Epic and Story only, no service desk behind it), and the caller is not an agent. The issue panel does not show there. Next: decide how the disputes project gets created.
+- Surprise: a service project created through the REST API is a shell (Epic and Story only, no service desk behind it), and the caller is not an agent. The issue panel does not show there. Replaced it with a project created from Jira's UI (Finance service management, company-managed so Forge validators apply); the panel then appeared and rendered the live rubric. M1 slice now runs webhook to work item to panel; the workflow validator is next.
 
 ## 26 Nov 2026
 - Checked fifteen platform facts against the Forge docs before writing Forge code ([SPIKES.md](SPIKES.md)). All three load-bearing assumptions held: function keys max 23 characters, Automation runs only GET actions, and a backend cannot read a Rovo reply. New find: Jira's experimental agents API can *start* an agent on issues, now spike S13.
