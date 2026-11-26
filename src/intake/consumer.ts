@@ -8,7 +8,7 @@ import { RECORD_SCHEMA_VERSION, type DisputeRecord } from '../core/record';
 import { findReason } from '../core/rubric/reasons';
 import type { Dispute } from '../core/types';
 import { getConfig } from '../lib/config';
-import { createIssue, findIssueByExternalId, findProject, pickIssueType, writeDisputeRecord } from '../lib/jira';
+import { createIssue, findIssueByExternalId, findProject, issueExists, pickIssueType, writeDisputeRecord } from '../lib/jira';
 
 export const DISPUTE_CREATED_CHANNEL = 'exhibita-dispute-created';
 
@@ -30,7 +30,8 @@ export async function processIntake(event: AsyncEvent): Promise<void> {
   // records written before this key existed (the search index can lag by a few seconds).
   const seenKey = `intake:${dispute.externalId}`;
   const seen = await kvs.get<{ issueKey: string }>(seenKey);
-  const existing = seen?.issueKey ?? (await findIssueByExternalId(config.projectKey, dispute.externalId));
+  const seenLive = seen?.issueKey && (await issueExists(seen.issueKey)) ? seen.issueKey : null;
+  const existing = seenLive ?? (await findIssueByExternalId(config.projectKey, dispute.externalId));
   if (existing) {
     console.log(`Dispute ${dispute.externalId} already recorded on ${existing}; skipping`);
     return;
