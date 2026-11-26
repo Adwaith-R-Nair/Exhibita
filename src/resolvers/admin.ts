@@ -5,7 +5,7 @@ import { kvs } from '@forge/kvs';
 import { publishGlobal } from '@forge/realtime';
 import Resolver from '@forge/resolver';
 import { getConfig, rotateWebhookSecret, saveConfig, type AppConfig } from '../lib/config';
-import { findProject } from '../lib/jira';
+import { createServiceProject, ensureProjectRoles, findProject } from '../lib/jira';
 import { audit, recentAudit, runMigrations } from '../lib/sql';
 
 export const SPIKE_CHANNEL = 'exhibita-platform-check';
@@ -39,6 +39,15 @@ resolver.define('rotateSecret', async ({ context }) => {
   return { secret };
 });
 
+resolver.define('createProject', async ({ context }) => {
+  const config = await getConfig();
+  const existing = await findProject(config.projectKey);
+  const project = existing ?? (await createServiceProject(config.projectKey, 'Disputes'));
+  const rolesAdded = context.accountId ? await ensureProjectRoles(project.key, context.accountId) : [];
+  await audit(context.accountId ?? 'unknown', existing ? 'set-up-project' : 'create-project', null).catch(() => undefined);
+  return { project, created: !existing, rolesAdded };
+});
+
 resolver.define('runChecks', async ({ context }) => {
   const config = await getConfig();
   const results = await Promise.all([
@@ -67,7 +76,7 @@ resolver.define('runChecks', async ({ context }) => {
       return 'published; the page shows whether it arrived';
     }),
     check('Teamwork Graph', async () => {
-      const res = await api.asUser().requestTeamworkGraph('query { __typename }');
+      const res = await api.asUser().requestTeamworkGraph('query exhibita_platformCheck { __typename }');
       const body = (await res.json()) as { errors?: { message: string }[] };
       if (body.errors?.length) throw new Error(body.errors.map((e) => e.message).join('; '));
       return `HTTP ${res.status}`;

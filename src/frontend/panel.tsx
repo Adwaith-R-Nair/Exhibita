@@ -112,7 +112,7 @@ function App() {
       )}
 
       <Box>
-        <Heading as="h4">Required</Heading>
+        <Heading size="xsmall">Required</Heading>
         <Stack space="space.075">
           {required.map((c) => (
             <Requirement key={c.id} check={c} />
@@ -121,7 +121,7 @@ function App() {
       </Box>
       {supporting.length > 0 && (
         <Box>
-          <Heading as="h4">Supporting</Heading>
+          <Heading size="xsmall">Supporting</Heading>
           <Stack space="space.075">
             {supporting.map((c) => (
               <Requirement key={c.id} check={c} />

@@ -36,6 +36,7 @@ function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [realtimeSeen, setRealtimeSeen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     call<Setup>('getSetup')
@@ -67,7 +68,6 @@ function App() {
 
   return (
     <Stack space="space.300">
-      <Heading as="h1">Exhibita setup</Heading>
       {error && (
         <SectionMessage appearance="error" title="Something went wrong">
           <Text>{error}</Text>
@@ -75,7 +75,7 @@ function App() {
       )}
 
       <Stack space="space.100">
-        <Heading as="h2">Disputes project</Heading>
+        <Heading size="medium">Disputes project</Heading>
         <Text>The Jira Service Management project where disputes are created.</Text>
         <Inline space="space.100" alignBlock="end">
           <Textfield name="projectKey" value={projectKey} onChange={(e) => setProjectKey(e.target.value.toUpperCase())} />
@@ -86,10 +86,29 @@ function App() {
             Save
           </Button>
         </Inline>
+        <Box>
+          <Button
+            isDisabled={busy !== null}
+            onClick={() =>
+              run('project', async () => {
+                const r = await call<{ project: { key: string; name: string }; created: boolean; rolesAdded: string[] }>('createProject');
+                const roles = r.rolesAdded.length ? ` Added you to ${r.rolesAdded.join(' and ')}.` : ' You already have the admin and agent roles.';
+                setNotice(`${r.created ? 'Created' : 'Found'} ${r.project.name} (${r.project.key}).${roles}`);
+              })
+            }
+          >
+            {busy === 'project' ? 'Setting up the project…' : 'Set up this project'}
+          </Button>
+        </Box>
+        {notice && (
+          <SectionMessage appearance="success">
+            <Text>{notice}</Text>
+          </SectionMessage>
+        )}
       </Stack>
 
       <Stack space="space.100">
-        <Heading as="h2">Dispute webhook</Heading>
+        <Heading size="medium">Dispute webhook</Heading>
         <Text>Send dispute events in a Stripe-compatible format to this address, with the secret in an x-exhibita-secret header.</Text>
         {setup?.webhookUrl && <Code>{setup.webhookUrl}</Code>}
         <Box>
@@ -106,7 +125,7 @@ function App() {
       </Stack>
 
       <Stack space="space.100">
-        <Heading as="h2">Platform checks</Heading>
+        <Heading size="medium">Platform checks</Heading>
         <Box>
           <Button
             appearance="primary"
