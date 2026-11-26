@@ -159,13 +159,14 @@ async function findWorkflow(name: string, as: Requester): Promise<WorkflowRead |
 
 async function existingStatusIds(as: Requester): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
-  for (const s of DISPUTE_STATUSES) {
+  // One lookup per status, in parallel: seven sequential calls were a large part of the step's time.
+  await Promise.all(DISPUTE_STATUSES.map(async (s) => {
     const res = await call<{ values: { id: string; name: string; statusCategory: string; scope?: { type: string } }[] }>(
       as, route`/rest/api/3/statuses/search?searchString=${s.name}&maxResults=50`, `Looking up status ${s.name}`,
     );
     const hit = res.values.find((v) => v.name.toLowerCase() === s.name.toLowerCase() && (!v.scope || v.scope.type === 'GLOBAL') && v.statusCategory === s.category);
     if (hit) out[s.name] = hit.id;
-  }
+  }));
   return out;
 }
 
@@ -203,11 +204,21 @@ async function statusIdsOfWorkflow(name: string, as: Requester): Promise<string[
   return (res.values[0]?.statuses ?? []).map((s) => s.id);
 }
 
+/** Work items of this type already in the project. Remapping their workflow would move them all to New. */
+async function countItemsOfType(project: ProjectSummary, typeId: string, as: Requester): Promise<number> {
+  const res = await call<{ count: number }>(as, route`/rest/api/3/search/approximate-count`, 'Counting work items', {
+    method: 'POST',
+    body: { jql: `project = "${project.key}" AND issuetype = ${typeId}` },
+  });
+  return res.count;
+}
+
 /**
- * Map the work type to the dispute workflow in the project's workflow scheme. Active schemes are changed
- * through a draft; existing items of the type move to New.
+ * Start mapping the work type to the dispute workflow in the project's workflow scheme. Active schemes
+ * change through a draft that Jira publishes asynchronously, so this returns the publish task, polled
+ * with publishTaskStatus on later calls; each resolver call stays well inside its time limit.
  */
-export async function mapWorkTypeToDisputeWorkflow(project: ProjectSummary, typeId: string, as: Requester = api.asUser()): Promise<'already' | 'mapped'> {
+export async function startDisputeWorkflowMapping(project: ProjectSummary, typeId: string, as: Requester = api.asUser()): Promise<'already' | { taskId: string }> {
   const res = await call<{ values: { workflowScheme: WorkflowScheme; projectIds: string[] }[] }>(
     as, route`/rest/api/3/workflowscheme/project?projectId=${project.id}`, `Reading the workflow scheme of ${project.key}`,
   );
@@ -216,7 +227,11 @@ export async function mapWorkTypeToDisputeWorkflow(project: ProjectSummary, type
   const scheme = entry.workflowScheme;
   if (scheme.issueTypeMappings[typeId] === DISPUTE_WORKFLOW_NAME) return 'already';
   if (entry.projectIds.length > 1) {
-    throw new Error(`The workflow scheme "${scheme.name}" is shared with other projects. Give ${project.key} its own scheme, then run setup again.`);
+    throw new Error(`The workflow scheme "${scheme.name}" is shared with other projects. Give ${project.key} its own scheme, then resume setup.`);
+  }
+  const existingItems = await countItemsOfType(project, typeId, as);
+  if (existingItems > 0) {
+    throw new Error(`${project.key} already has ${existingItems} work items of type Dispute on another workflow. Switching would move them all to New, so setup stopped. Choose an empty disputes project, or map the workflow by hand.`);
   }
 
   const oldWorkflow = scheme.issueTypeMappings[typeId] ?? scheme.defaultWorkflow;
@@ -233,19 +248,22 @@ export async function mapWorkTypeToDisputeWorkflow(project: ProjectSummary, type
     body: { issueType: typeId, workflow: DISPUTE_WORKFLOW_NAME },
   });
   const statusMappings = oldStatuses.filter((id) => id !== newStatusId).map((statusId) => ({ issueTypeId: typeId, statusId, newStatusId }));
-  const task = await call<{ self: string; status: string }>(as, route`/rest/api/3/workflowscheme/${scheme.id}/draft/publish`, 'Publishing the workflow scheme', {
+  const task = await call<{ self: string }>(as, route`/rest/api/3/workflowscheme/${scheme.id}/draft/publish`, 'Publishing the workflow scheme', {
     method: 'POST',
     body: { statusMappings },
   });
-  // Publishing is asynchronous; wait for the task, bounded so the step stays well inside the resolver limit.
-  const taskId = task.self.split('/').pop() ?? '';
-  for (let i = 0; i < 12; i++) {
+  return { taskId: task.self.split('/').pop() ?? '' };
+}
+
+/** Poll a publish task briefly. 'running' means call again later. */
+export async function publishTaskStatus(taskId: string, as: Requester = api.asUser()): Promise<'complete' | 'running'> {
+  for (let i = 0; i < 5; i++) {
     const t = await call<{ status: string; message?: string }>(as, route`/rest/api/3/task/${taskId}`, 'Checking the publish task');
-    if (t.status === 'COMPLETE') return 'mapped';
+    if (t.status === 'COMPLETE') return 'complete';
     if (['FAILED', 'CANCELLED', 'DEAD'].includes(t.status)) throw new Error(`Publishing the workflow scheme failed: ${t.message ?? t.status}`);
     await sleep(1000);
   }
-  return 'mapped';
+  return 'running';
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -263,14 +281,28 @@ export async function ensureCausesLinkType(as: Requester = api.asUser()): Promis
   return CAUSES_LINK.name;
 }
 
-/** Create up to 50 work items in one call. Returns their keys in the same order. */
-export async function createIssuesBulk(issueUpdates: readonly { fields: Record<string, unknown> }[], as: Requester = api.asApp()): Promise<{ id: string; key: string }[]> {
+export interface BulkResult {
+  /** One entry per input, in input order: the created work item, or null where Jira refused it. */
+  created: ({ id: string; key: string } | null)[];
+  /** Why the refused ones failed, for the error message. */
+  errors: string[];
+}
+
+/**
+ * Create up to 50 work items in one call. Jira creates the good ones even when some fail, so the result
+ * keeps every success by position; callers record those before reporting the failures, or a resumed run
+ * would create them twice (review C).
+ */
+export async function createIssuesBulk(issueUpdates: readonly { fields: Record<string, unknown> }[], as: Requester = api.asApp()): Promise<BulkResult> {
   if (issueUpdates.length > 50) throw new RangeError('Jira creates at most 50 work items per call');
-  const res = await call<{ issues: { id: string; key: string }[]; errors: { failedElementNumber: number; elementErrors: unknown }[] }>(
-    as, route`/rest/api/3/issue/bulk`, 'Creating work items', { method: 'POST', body: { issueUpdates } },
-  );
-  if (res.errors.length > 0) throw new Error(`Jira rejected ${res.errors.length} work items: ${JSON.stringify(res.errors[0]).slice(0, 300)}`);
-  return res.issues;
+  const res = await as.requestJira(route`/rest/api/3/issue/bulk`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ issueUpdates }) });
+  const text = await res.text();
+  if (!res.ok && res.status !== 400) throw new JiraError('Creating work items', res.status, text);
+  const body = (text ? JSON.parse(text) : {}) as { issues?: { id: string; key: string }[]; errors?: { failedElementNumber: number; elementErrors: unknown }[] };
+  const failed = new Set((body.errors ?? []).map((e) => e.failedElementNumber));
+  const ok = [...(body.issues ?? [])];
+  const created = issueUpdates.map((_, i) => (failed.has(i) ? null : (ok.shift() ?? null)));
+  return { created, errors: (body.errors ?? []).map((e) => JSON.stringify(e.elementErrors).slice(0, 200)) };
 }
 
 export async function addComment(issueKey: string, text: string, as: Requester = api.asApp()): Promise<string> {
@@ -281,11 +313,15 @@ export async function addComment(issueKey: string, text: string, as: Requester =
   return res.id;
 }
 
-/** outward causes inward, e.g. a deploy causes an incident. */
+/**
+ * Record "cause causes effect", e.g. a deploy causes an incident. Jira's create call reads the other way
+ * round from its field names: the inwardIssue is the one doing the outward verb ("causes"). Verified
+ * live: the reverse shape made INC-1 read "causes DEP-1".
+ */
 export async function linkCauses(linkType: string, causeKey: string, effectKey: string, as: Requester = api.asApp()): Promise<void> {
   await call(as, route`/rest/api/3/issueLink`, `Linking ${causeKey} to ${effectKey}`, {
     method: 'POST',
-    body: { type: { name: linkType }, outwardIssue: { key: causeKey }, inwardIssue: { key: effectKey } },
+    body: { type: { name: linkType }, inwardIssue: { key: causeKey }, outwardIssue: { key: effectKey } },
   });
 }
 

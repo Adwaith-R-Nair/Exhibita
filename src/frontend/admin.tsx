@@ -71,6 +71,8 @@ function DemoData() {
       while (p.status === 'running') {
         p = await call<SeedProgress>('seedStep');
         setProgress(p);
+        // Another tab holds the lock, or Jira is still publishing: wait a moment instead of hammering.
+        if (/another tab|still publishing/.test(p.message)) await new Promise((r) => setTimeout(r, 2000));
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -168,8 +170,9 @@ function DemoData() {
           {confirmRemove ? (
             <SectionMessage appearance="warning" title="Remove all demo data?">
               <Text>
-                Moves the demo projects and the policy space to the trash (an admin can restore them for 60 days), deletes demo disputes, and
-                empties the demo tables.
+                Moves the projects setup created to the Jira trash (an admin can restore them for 60 days), removes the demo policy space,
+                deletes the demo disputes and their stored records, and deletes the demo rows from the payment tables. Nothing setup did not
+                create is touched.
               </Text>
               <Inline space="space.100">
                 <Button appearance="danger" onClick={remove}>
@@ -328,7 +331,7 @@ function App() {
 
       <Stack space="space.100">
         <Heading size="medium">Dispute webhook</Heading>
-        <Text>Send dispute events in a Stripe-compatible format to this address, with the secret in an x-exhibita-secret header.</Text>
+        <Text>{'Send dispute events in a Stripe-compatible format to this address. Sign each one with the webhook secret the way Stripe does: an x-exhibita-signature (or stripe-signature) header of t=<unix time>,v1=<HMAC-SHA256 of "t.body">. Requests older than five minutes are refused.'}</Text>
         {setup?.webhookUrl && <Code>{setup.webhookUrl}</Code>}
         <Box>
           <Button isDisabled={busy !== null} onClick={() => run('secret', async () => setSecret((await call<{ secret: string }>('rotateSecret')).secret))}>

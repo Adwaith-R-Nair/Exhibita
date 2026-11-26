@@ -2,13 +2,11 @@
 // recommendation the generator intended. Catches drift between the collectors' reference observer and
 // what the site actually returns.
 
-import api, { route } from '@forge/api';
 import { generateWorld } from '../core/demo';
 import { normalizeDisputeEvent } from '../core/intake/normalize';
-import { getConfig } from './config';
-import { DEMO_LABEL } from './demo-label';
 import { evaluateIssue } from './evaluate-issue';
 import { getSeedState } from './seed';
+import { ledgerIssues } from './store';
 
 export interface DemoCheck {
   total: number;
@@ -17,30 +15,16 @@ export interface DemoCheck {
   mismatches: { issueKey: string | null; externalId: string; scenario: string; expected: string; actual: string }[];
 }
 
-async function demoIssues(projectKey: string): Promise<Map<string, { id: string; key: string }>> {
-  const out = new Map<string, { id: string; key: string }>();
-  let nextPageToken: string | undefined;
-  do {
-    const res = await api.asApp().requestJira(route`/rest/api/3/search/jql`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ jql: `project = "${projectKey}" AND labels = "${DEMO_LABEL}"`, fields: ['summary'], properties: ['exhibita'], maxResults: 100, ...(nextPageToken ? { nextPageToken } : {}) }),
-    });
-    const body = (await res.json()) as { issues: { id: string; key: string; properties?: { exhibita?: { dispute?: { externalId?: string } } } }[]; nextPageToken?: string };
-    for (const i of body.issues) {
-      const ext = i.properties?.exhibita?.dispute?.externalId;
-      if (ext) out.set(ext, { id: i.id, key: i.key });
-    }
-    nextPageToken = body.nextPageToken;
-  } while (nextPageToken);
-  return out;
-}
-
 export async function checkDemo(): Promise<DemoCheck | null> {
   const state = await getSeedState();
   if (!state) return null;
   const world = generateWorld({ seed: state.seed, now: state.now });
-  const issues = await demoIssues((await getConfig()).projectKey);
+  const ids = world.disputes.flatMap((d) => {
+    const n = normalizeDisputeEvent(d.payload);
+    return n.ok ? [n.dispute.externalId] : [];
+  });
+  // The ledger, not issue properties, says which work item holds which dispute.
+  const issues = new Map((await ledgerIssues(ids)).map((l) => [l.externalId, l.issueKey]));
   const result: DemoCheck = { total: world.disputes.length, found: 0, matching: 0, mismatches: [] };
   const BATCH = 10;
   for (let i = 0; i < world.disputes.length; i += BATCH) {
@@ -54,10 +38,10 @@ export async function checkDemo(): Promise<DemoCheck | null> {
           return;
         }
         result.found += 1;
-        const loaded = await evaluateIssue(issue.key, issue.id);
+        const loaded = await evaluateIssue(issue);
         const actual = loaded.verdict?.recommendation ?? `no trusted record (${loaded.trust})`;
         if (actual === d.expected) result.matching += 1;
-        else result.mismatches.push({ issueKey: issue.key, externalId: n.dispute.externalId, scenario: d.scenario, expected: d.expected, actual });
+        else result.mismatches.push({ issueKey: issue, externalId: n.dispute.externalId, scenario: d.scenario, expected: d.expected, actual });
       }),
     );
   }
