@@ -34,6 +34,17 @@ modules:
         - path: dispute.externalId
           type: string
           searchAlias: exhibitaDisputeId
+        - path: dispute.customer
+          type: string
+          searchAlias: exhibitaDisputeCustomer
+    # Support tickets by customer, so the collectors can find a customer's messages.
+    - key: exhibita-ticket-index
+      entityType: issue
+      propertyKey: exhibita-ticket
+      values:
+        - path: customerId
+          type: string
+          searchAlias: exhibitaTicketCustomer
 
   webtrigger:
     - key: exhibita-dispute-intake

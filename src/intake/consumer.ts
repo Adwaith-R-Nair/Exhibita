@@ -9,19 +9,23 @@ import { findReason } from '../core/rubric/reasons';
 import type { Dispute } from '../core/types';
 import { getConfig } from '../lib/config';
 import { createIssue, findIssueByExternalId, findProject, getIssueId, pickIssueType } from '../lib/jira';
+import { collectAndSave } from '../lib/collect';
 import { readStoredRecord, saveRecord } from '../lib/records';
+import { DEMO_LABEL } from '../lib/demo-label';
 
 export const DISPUTE_CREATED_CHANNEL = 'exhibita-dispute-created';
 
 interface IntakeMessage {
   dispute: Dispute;
   raw: unknown;
+  /** Set by the demo setup wizard, so "Remove demo data" can find these work items. */
+  demo?: boolean;
 }
 
 const money = (d: Dispute) => `${(d.amount / 100).toFixed(2)} ${d.currency}`;
 
 export async function processIntake(event: AsyncEvent): Promise<void> {
-  const { dispute, raw } = event.body as unknown as IntakeMessage;
+  const { dispute, raw, demo } = event.body as unknown as IntakeMessage;
   const config = await getConfig();
 
   const project = await findProject(config.projectKey);
@@ -61,12 +65,21 @@ export async function processIntake(event: AsyncEvent): Promise<void> {
       `Order: ${dispute.orderId ?? 'unknown'} · Customer: ${dispute.customer ?? 'unknown'}`,
       `Processor dispute: ${dispute.externalId}`,
     ].join('\n'),
-    labels: ['exhibita', 'dispute'],
+    labels: ['exhibita', 'dispute', ...(demo ? [DEMO_LABEL] : [])],
   });
 
   await saveRecord(issue, fresh);
   await kvs.set(seenKey, { issueKey: issue.key });
 
+  // Collect evidence straight away. If a source is down the dispute still exists with an empty record,
+  // and the panel's "Collect evidence again" retries.
+  let evidenceCount = 0;
+  try {
+    evidenceCount = (await collectAndSave(issue, fresh, config.projectKey)).evidence.length;
+  } catch (error) {
+    console.error(`Evidence collection failed for ${issue.key}`, error);
+  }
+
   await publishGlobal(DISPUTE_CREATED_CHANNEL, JSON.stringify({ issueKey: issue.key, externalId: dispute.externalId }));
-  console.log(`Created ${issue.key} for dispute ${dispute.externalId}`);
+  console.log(`Created ${issue.key} for dispute ${dispute.externalId} with ${evidenceCount} evidence items`);
 }
