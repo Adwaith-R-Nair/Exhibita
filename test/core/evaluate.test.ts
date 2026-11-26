@@ -112,7 +112,7 @@ describe('item not received (Visa 13.1)', () => {
     ]);
     expect(r.checks.find((c) => c.id === 'delivery-proof')?.status).toBe('failed');
     expect(r.recommendation).toBe('investigate');
-    expect(r.why).toMatch(/conflict/i);
+    expect(r.why).toMatch(/against us/i);
   });
 });
 
@@ -254,5 +254,21 @@ describe('triage edges', () => {
   it('never reports a win percentage (D-08)', () => {
     const r = evaluateDispute(dispute('visa-13.1', 20), [ev('delivery', 'delivered', 'X')]);
     expect(JSON.stringify(r)).not.toMatch(/win|probab|percent|odds|%/i);
+  });
+});
+
+describe('plain-English explanations', () => {
+  it('names a conceded fact as a sentence, not "Evidence <state>"', () => {
+    const dup = evaluateDispute(dispute('visa-12.6.1', 60), [ev('order-pair', 'duplicate', 'ORD-9'), ev('incident', 'none', 'OPS')]);
+    expect(dup.why).toMatch(/^This charge is a true duplicate of another charge \(ORD-9\)\./);
+    const cancelled = evaluateDispute(dispute('visa-13.2', 30), [ev('cancellation', 'cancelled-before-charge', 'SUB-1')]);
+    expect(cancelled.why).toMatch(/^The customer cancelled before the charge \(SUB-1\)\./);
+    expect(cancelled.why).not.toMatch(/^Evidence/);
+  });
+
+  it('says evidence is against us when nothing conflicts, and conflicting only when it does', () => {
+    const against = evaluateDispute(dispute('visa-10.4', 80), [ev('3ds', 'not-attempted', 'ORD-1'), ev('prior-orders', 'not-eligible', 'ORD-1')]);
+    expect(against.recommendation).toBe('investigate');
+    expect(against.why).toMatch(/^Evidence is against us on:/);
   });
 });

@@ -86,6 +86,22 @@ function coverageOf(checks: readonly CheckResult[]): Coverage {
 }
 
 const cite = (e: EvidenceItem | undefined): string => (e ? ` (${e.source.key})` : '');
+
+/** The fact that concedes a dispute, as the start of a sentence. */
+function concession(e: EvidenceItem): string {
+  switch (e.type) {
+    case 'refund':
+      return `Refund ${describeState(e.state)}`;
+    case 'cancellation':
+      return e.state === 'cancelled-before-charge' ? 'The customer cancelled before the charge' : `Cancellation: ${describeState(e.state)}`;
+    case 'order-pair':
+      return `This charge is ${describeState(e.state)}`;
+    case 'incident':
+      return `An incident is ${describeState(e.state)}`;
+    default:
+      return `${e.type.replaceAll('-', ' ').replace(/^./, (c) => c.toUpperCase())}: ${describeState(e.state)}`;
+  }
+}
 const list = (checks: readonly CheckResult[]): string => checks.map((c) => c.label).join('; ');
 
 export function triage(checks: readonly CheckResult[], reason: Reason): { recommendation: Recommendation; why: string } {
@@ -93,7 +109,7 @@ export function triage(checks: readonly CheckResult[], reason: Reason): { recomm
   const conceded = checks.find((c) => c.status === 'conceded');
   if (conceded) {
     const e = conceded.contradictions[0];
-    const what = e ? `${e.type === 'refund' ? 'Refund' : 'Evidence'} ${describeState(e.state)}${cite(e)}` : conceded.label;
+    const what = e ? `${concession(e)}${cite(e)}` : conceded.label;
     return {
       recommendation: 'accept',
       why: `${what}. The customer is right on this point, so fighting would cost the fee and likely still lose.`,
@@ -108,9 +124,13 @@ export function triage(checks: readonly CheckResult[], reason: Reason): { recomm
   if (unmet.length === required.length && unmet.every((c) => c.status === 'missing')) {
     return { recommendation: 'investigate', why: `Insufficient evidence: nothing found yet for ${list(unmet)}.` };
   }
-  const conflicting = unmet.filter((c) => c.status === 'failed' || c.status === 'contradicted');
+  const conflicting = unmet.filter((c) => c.status === 'contradicted');
   if (conflicting.length > 0) {
     return { recommendation: 'investigate', why: `Evidence conflicts on: ${list(conflicting)}.` };
+  }
+  const against = unmet.filter((c) => c.status === 'failed');
+  if (against.length > 0) {
+    return { recommendation: 'investigate', why: `Evidence is against us on: ${list(against)}.` };
   }
   return { recommendation: 'investigate', why: `Still missing: ${list(unmet)}.` };
 }

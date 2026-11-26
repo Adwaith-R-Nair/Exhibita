@@ -86,7 +86,9 @@ const money = (d: Dispute) => `${(d.amount / 100).toLocaleString('en-US', { styl
 const day = (iso: string) => iso.slice(0, 10);
 
 function Exhibit({ item, index }: { item: EvidenceItem; index: number }) {
-  const source = `${item.source.key}${item.meta?.version ? ` (${item.meta.version})` : ''}`;
+  // Confluence page ids mean nothing to a reader; Jira keys and table rows do.
+  const name = item.source.kind === 'confluence' && item.source.title ? item.source.title : item.source.key;
+  const source = `${name}${item.meta?.version ? ` (${item.meta.version})` : ''}`;
   return (
     <Stack space="space.025">
       <Inline space="space.100" alignBlock="center">

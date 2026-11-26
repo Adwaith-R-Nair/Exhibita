@@ -87,8 +87,13 @@ const incidentLinked: Rule = (_d, evidence) =>
     .map((e) => ({
       rule: 'incident-linked',
       severity: 'decisive',
-      title: 'A linked incident caused this charge problem',
-      detail: `${e.source.key} is ${describeState(e.state)} and is linked to this order.`,
+      title:
+        e.state === 'caused-dropped-refund'
+          ? "A linked incident dropped this customer's refund"
+          : e.state === 'caused-duplicate-charge'
+            ? 'A linked incident caused duplicate charges'
+            : 'A linked incident caused this problem',
+      detail: `${e.source.key}${e.source.title ? ` (${e.source.title})` : ''} is ${describeState(e.state)}, recorded by an explicit link to this order.`,
       evidence: [e],
     }));
 
