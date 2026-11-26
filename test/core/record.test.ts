@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { asDisputeRecord, RECORD_SCHEMA_VERSION } from '../../src/core/record.js';
-import { minor } from '../../src/core/types.js';
+import { asDisputeRecord, RECORD_SCHEMA_VERSION } from '../../src/core/record';
+import { minor } from '../../src/core/types';
 
 const valid = {
   schemaVersion: RECORD_SCHEMA_VERSION,

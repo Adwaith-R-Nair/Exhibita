@@ -4,7 +4,7 @@
 // Codes follow the published Visa and Mastercard dispute categories. Response windows and
 // thresholds vary by processor agreement, so they are configuration, not rubric data.
 
-import type { Reason, ReasonKey, Requirement } from '../types.js';
+import type { Reason, ReasonKey, Requirement } from '../types';
 
 /** A refund is owed or already promised and still outstanding: the customer is right. */
 const REFUND_OWED = ['approved-not-completed'] as const;

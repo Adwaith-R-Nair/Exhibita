@@ -1,7 +1,7 @@
 // jira:workflowValidator on "Submit to network" (D-07).
 // Passes only when the rubric says fight and every required exhibit is present. Fails closed.
 
-import { evaluateIssue } from '../lib/evaluate-issue.js';
+import { evaluateIssue } from '../lib/evaluate-issue';
 
 interface ValidatorEvent {
   issue?: { key?: string };

@@ -1,7 +1,7 @@
 // Maps a processor dispute event in a Stripe-compatible JSON shape to Exhibita's dispute record.
 // Pure and defensive: the payload comes from outside, so every field is checked, never trusted.
 
-import { minor, type Dispute } from '../types.js';
+import { minor, type Dispute } from '../types';
 
 export type NormalizeResult =
   | { ok: true; dispute: Dispute }

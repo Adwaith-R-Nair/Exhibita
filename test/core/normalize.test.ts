@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeDisputeEvent } from '../../src/core/intake/normalize.js';
+import { normalizeDisputeEvent } from '../../src/core/intake/normalize';
 
 const event = (overrides: Record<string, unknown> = {}, object: Record<string, unknown> = {}) => ({
   id: 'evt_1',

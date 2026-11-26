@@ -1,7 +1,7 @@
 // Backend for the issue panel: evaluates the dispute on the current work item.
 
 import Resolver from '@forge/resolver';
-import { evaluateIssue } from '../lib/evaluate-issue.js';
+import { evaluateIssue } from '../lib/evaluate-issue';
 
 const resolver = new Resolver();
 

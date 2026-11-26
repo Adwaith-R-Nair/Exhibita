@@ -2,10 +2,10 @@
 // real engine (rubric, challenge, clustering) and checks one behaviour. The same module runs in the
 // unit tests and behind the "Run validation suite" button, so what CI proves is what an admin sees.
 
-import { challengeDispute } from '../challenge/challenge.js';
-import { clusterDisputes, type DisputeCase } from '../cluster/cluster.js';
-import { evaluateDispute } from '../rubric/evaluate.js';
-import { minor, type Dispute, type EvidenceItem, type EvidenceMeta, type EvidenceType } from '../types.js';
+import { challengeDispute } from '../challenge/challenge';
+import { clusterDisputes, type DisputeCase } from '../cluster/cluster';
+import { evaluateDispute } from '../rubric/evaluate';
+import { minor, type Dispute, type EvidenceItem, type EvidenceMeta, type EvidenceType } from '../types';
 
 export interface ValidationCase {
   id: number;

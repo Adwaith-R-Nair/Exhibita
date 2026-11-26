@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateDispute } from '../../src/core/rubric/evaluate.js';
-import { findReason, REASONS } from '../../src/core/rubric/reasons.js';
-import { minor, type Dispute, type EvidenceItem, type EvidenceType } from '../../src/core/types.js';
+import { evaluateDispute } from '../../src/core/rubric/evaluate';
+import { findReason, REASONS } from '../../src/core/rubric/reasons';
+import { minor, type Dispute, type EvidenceItem, type EvidenceType } from '../../src/core/types';
 
 let seq = 0;
 const ev = (type: EvidenceType, state: string, key: string, kind: 'fact' | 'inference' = 'fact'): EvidenceItem => ({

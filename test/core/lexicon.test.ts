@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyMessage, type MessageLabel } from '../../src/core/classify/lexicon.js';
+import { classifyMessage, type MessageLabel } from '../../src/core/classify/lexicon';
 
 const labels = (text: string): MessageLabel[] => [...new Set(classifyMessage(text).map((m) => m.label))].sort();
 

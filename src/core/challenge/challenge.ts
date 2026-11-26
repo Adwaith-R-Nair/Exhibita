@@ -1,8 +1,8 @@
 // "Challenge this": a deterministic red team that looks for reasons our own case is weaker than the
 // rubric alone suggests. It never invents evidence and never claims causation without a link.
 
-import { describeState } from '../rubric/states.js';
-import type { Dispute, Evaluation, EvidenceItem, Recommendation } from '../types.js';
+import { describeState } from '../rubric/states';
+import type { Dispute, Evaluation, EvidenceItem, Recommendation } from '../types';
 
 export type ChallengeRule =
   | 'refund-outstanding'

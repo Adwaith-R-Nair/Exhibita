@@ -2,7 +2,7 @@
 // measures the blast radius: who else was affected but hasn't disputed yet, and what it has cost.
 // Clustering uses links only, never timing (AGENTS.md invariant 7).
 
-import type { Currency, EvidenceItem, MinorUnits } from '../types.js';
+import type { Currency, EvidenceItem, MinorUnits } from '../types';
 
 export interface DisputeCase {
   issueKey: string;

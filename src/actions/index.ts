@@ -1,6 +1,6 @@
 // Rovo agent and MCP tools. All GET: they read and explain, never change anything (D-06).
 
-import { evaluateIssue } from '../lib/evaluate-issue.js';
+import { evaluateIssue } from '../lib/evaluate-issue';
 
 interface ActionPayload {
   issueKey?: string;

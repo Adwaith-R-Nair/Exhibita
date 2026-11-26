@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { challengeDispute } from '../../src/core/challenge/challenge.js';
-import { evaluateDispute } from '../../src/core/rubric/evaluate.js';
-import { minor, type Dispute, type EvidenceItem, type EvidenceMeta, type EvidenceType } from '../../src/core/types.js';
+import { challengeDispute } from '../../src/core/challenge/challenge';
+import { evaluateDispute } from '../../src/core/rubric/evaluate';
+import { minor, type Dispute, type EvidenceItem, type EvidenceMeta, type EvidenceType } from '../../src/core/types';
 
 let seq = 0;
 const ev = (

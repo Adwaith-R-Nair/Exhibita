@@ -1,11 +1,11 @@
 // Load a work item's dispute record and evaluate it. Shared by the panel, validator and agent actions,
 // so every surface reaches the same verdict from the same data (D-04).
 
-import type { DisputeRecord } from '../core/record.js';
-import { evaluateDispute } from '../core/rubric/evaluate.js';
-import { minor, type Evaluation } from '../core/types.js';
-import { getConfig } from './config.js';
-import { readDisputeRecord } from './jira.js';
+import type { DisputeRecord } from '../core/record';
+import { evaluateDispute } from '../core/rubric/evaluate';
+import { minor, type Evaluation } from '../core/types';
+import { getConfig } from './config';
+import { readDisputeRecord } from './jira';
 
 export interface IssueEvaluation {
   issueKey: string;

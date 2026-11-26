@@ -4,8 +4,8 @@
 import type { WebTriggerRequest, WebTriggerResponse } from '@forge/api';
 import { Queue } from '@forge/events';
 import { timingSafeEqual } from 'node:crypto';
-import { normalizeDisputeEvent } from '../core/intake/normalize.js';
-import { getWebhookSecret } from '../lib/config.js';
+import { normalizeDisputeEvent } from '../core/intake/normalize';
+import { getWebhookSecret } from '../lib/config';
 
 export const INTAKE_QUEUE = 'exhibita-intake';
 

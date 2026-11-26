@@ -1,6 +1,6 @@
 // The dispute record stored on each Jira work item (D-04). Every surface reads this one shape.
 
-import type { Dispute, EvidenceItem } from './types.js';
+import type { Dispute, EvidenceItem } from './types';
 
 export const RECORD_PROPERTY_KEY = 'exhibita';
 export const RECORD_SCHEMA_VERSION = 1;

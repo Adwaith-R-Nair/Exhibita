@@ -15,9 +15,9 @@ import {
   type Requirement,
   type RubricContext,
   type StateMatch,
-} from '../types.js';
-import { findReason } from './reasons.js';
-import { describeState } from './states.js';
+} from '../types';
+import { findReason } from './reasons';
+import { describeState } from './states';
 
 export interface EvaluateOptions {
   /** Orders at or above this amount need a signed proof of delivery. Default $150. */

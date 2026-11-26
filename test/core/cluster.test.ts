@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { blastRadius, clusterDisputes, type AffectedOrder, type DisputeCase } from '../../src/core/cluster/cluster.js';
-import { minor, type EvidenceItem } from '../../src/core/types.js';
+import { blastRadius, clusterDisputes, type AffectedOrder, type DisputeCase } from '../../src/core/cluster/cluster';
+import { minor, type EvidenceItem } from '../../src/core/types';
 
 let seq = 0;
 const refundDroppedBy = (incident: string, deploy?: string): EvidenceItem => ({

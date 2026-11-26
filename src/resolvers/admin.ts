@@ -4,9 +4,9 @@ import api, { webTrigger } from '@forge/api';
 import { kvs } from '@forge/kvs';
 import { publishGlobal } from '@forge/realtime';
 import Resolver from '@forge/resolver';
-import { getConfig, rotateWebhookSecret, saveConfig, type AppConfig } from '../lib/config.js';
-import { findProject } from '../lib/jira.js';
-import { audit, recentAudit, runMigrations } from '../lib/sql.js';
+import { getConfig, rotateWebhookSecret, saveConfig, type AppConfig } from '../lib/config';
+import { findProject } from '../lib/jira';
+import { audit, recentAudit, runMigrations } from '../lib/sql';
 
 export const SPIKE_CHANNEL = 'exhibita-platform-check';
 

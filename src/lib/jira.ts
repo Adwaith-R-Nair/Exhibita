@@ -1,7 +1,7 @@
 // Thin, typed wrappers over the Jira REST API. Everything that talks to Jira goes through here.
 
 import api, { route } from '@forge/api';
-import { asDisputeRecord, RECORD_PROPERTY_KEY, type DisputeRecord } from '../core/record.js';
+import { asDisputeRecord, RECORD_PROPERTY_KEY, type DisputeRecord } from '../core/record';
 
 export class JiraError extends Error {
   constructor(

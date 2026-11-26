@@ -3,11 +3,11 @@
 
 import type { AsyncEvent } from '@forge/events';
 import { publishGlobal } from '@forge/realtime';
-import { RECORD_SCHEMA_VERSION, type DisputeRecord } from '../core/record.js';
-import { findReason } from '../core/rubric/reasons.js';
-import type { Dispute } from '../core/types.js';
-import { getConfig } from '../lib/config.js';
-import { createIssue, findIssueByExternalId, findProject, pickIssueType, writeDisputeRecord } from '../lib/jira.js';
+import { RECORD_SCHEMA_VERSION, type DisputeRecord } from '../core/record';
+import { findReason } from '../core/rubric/reasons';
+import type { Dispute } from '../core/types';
+import { getConfig } from '../lib/config';
+import { createIssue, findIssueByExternalId, findProject, pickIssueType, writeDisputeRecord } from '../lib/jira';
 
 export const DISPUTE_CREATED_CHANNEL = 'exhibita-dispute-created';
 
