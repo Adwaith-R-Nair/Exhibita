@@ -82,8 +82,10 @@ This is the engineering log for Exhibita, a Forge app for Jira Service Managemen
 - **My own ordering mistake, caught before running:** the first draft cancelled the stuck refund before accepting the dispute. If the transition then failed, the customer would be owed nothing while the dispute stayed open. Reversed: accept first, then cancel, with a repair pass on each call.
 - **Atlassian site maintenance** (found live): mid-removal and mid-setup, Jira answered 403 "Tenant is restricted: migration". A permission check reported this as a refusal and stopped the removal; setup showed the raw error. Checks now retry temporary answers and setup explains the maintenance (`3b36141`). Both runs resumed without losing work, which is what the resumable design was for.
 - Opening the panel once failed with Jira's generic "We couldn't perform the action"; a retry opened it. Platform-side, not reproduced.
+- **Stale cluster state after a rebuild** (found live): the page showed the previous demo's refunds as queued and its cost bug as filed, because actions were stored under the incident key and the rebuilt INC-1 reused it; titles were also missing because the search index had not caught up with the new issues. Actions are now stored under the incident's issue id, which is never reused, and titles are read directly (`6f86c7b`).
 
 ### Verified live
+- The demo was rebuilt through intermittent "Tenant is restricted" refusals by resuming several times: exactly 27 tickets, no duplicate comments, 63 disputes, clean keys, and 63 of 63 as intended. The hero's panel links to the page.
 - The page traced INC-1 ("Refund worker marked refunds as sent without sending them") to DEP-1: 38 disputes, $5,492.00 disputed, $6,062.00 with fees, 212 customers not yet disputed owed $30,859.00, about 15.8 analyst hours.
 - Accept: all 38 disputes moved to Accepted with the explanation comment; collecting the hero's evidence again showed REF-1001 as "cancelled because the accepted chargeback settles it".
 - Queue: 212 refunds queued with tracking item SUP-28 linked to INC-1.
