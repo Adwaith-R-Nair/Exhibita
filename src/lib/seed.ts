@@ -556,7 +556,10 @@ export async function runSeedStep(ctx: SeedContext): Promise<SeedProgress> {
   } catch (error) {
     // Keep everything recorded so far; starting again resumes this step.
     state.status = 'failed';
-    state.error = `${step.label}: ${error instanceof Error ? error.message : String(error)}`;
+    const message = error instanceof Error ? error.message : String(error);
+    state.error = /tenant is restricted/i.test(message)
+      ? `${step.label}: Atlassian is doing maintenance on this site and refused a change for now. Everything so far is kept; resume in a few minutes.`
+      : `${step.label}: ${message}`;
     state.lockedUntil = null;
     await kvs.set(STATE_KEY, state);
     console.error('Demo setup step failed', error instanceof JiraError ? error.message : error);
