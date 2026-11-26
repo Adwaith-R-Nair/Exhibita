@@ -22,13 +22,18 @@ export async function validateSubmit(event: ValidatorEvent): Promise<ValidatorRe
     if (!loaded.record) {
       return { result: false, errorMessage: `${UNTRUSTED_RECORD_MESSAGE[loaded.trust === 'unverified' ? 'unverified' : 'none']} Submission is blocked.` };
     }
-    const { evaluation } = loaded;
-    if (evaluation.canSubmit) return { result: true };
-    if (evaluation.recommendation === 'accept') {
-      return { result: false, errorMessage: `Exhibita recommends accepting this dispute: ${evaluation.why}` };
+    const { evaluation, verdict, challenge } = loaded;
+    if (verdict.canSubmit) return { result: true };
+    if (verdict.recommendation === 'accept') {
+      return { result: false, errorMessage: `Exhibita recommends accepting this dispute: ${verdict.why}` };
     }
-    const missing = evaluation.blockers.length > 0 ? evaluation.blockers.join('; ') : evaluation.why;
-    return { result: false, errorMessage: `Evidence incomplete (${evaluation.coverage.met} of ${evaluation.coverage.total} required). Add: ${missing}` };
+    if (!evaluation.canSubmit) {
+      const missing = evaluation.blockers.length > 0 ? evaluation.blockers.join('; ') : evaluation.why;
+      return { result: false, errorMessage: `Evidence incomplete (${evaluation.coverage.met} of ${evaluation.coverage.total} required). Add: ${missing}` };
+    }
+    // Every item is met, but the challenge found something that makes fighting unsafe.
+    const problems = challenge.findings.filter((f) => f.severity !== 'note').map((f) => f.title);
+    return { result: false, errorMessage: `Challenge found a problem to resolve before submitting: ${problems.join('; ') || verdict.why}` };
   } catch (error) {
     console.error('Submit validator failed closed', error);
     return { result: false, errorMessage: 'Exhibita could not check the evidence right now, so submission is blocked. Try again in a minute.' };

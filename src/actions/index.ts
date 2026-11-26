@@ -46,13 +46,17 @@ export async function evaluateRubric(payload: ActionPayload) {
   const loaded = issueKey ? await evaluateIssue(issueKey) : null;
   if (!loaded?.record) return notFound(loaded);
   const e = loaded.evaluation;
+  const v = loaded.verdict;
   return {
     issueKey,
     ...recordNote(loaded),
-    recommendation: e.recommendation,
-    why: e.why,
+    recommendation: v.recommendation,
+    why: v.why,
+    checklistRecommendation: e.recommendation,
+    changedByChallenge: v.changed,
+    caseAgainst: loaded.challenge.findings.map((f) => ({ severity: f.severity, title: f.title, detail: f.detail, sources: f.evidence.map((x) => x.source.key) })),
     coverage: `${e.coverage.met} of ${e.coverage.total} required items met (${e.coverage.label})`,
-    canSubmit: e.canSubmit,
+    canSubmit: v.canSubmit,
     blockers: e.blockers,
     requirements: e.checks.map((c) => ({
       label: c.label,
