@@ -1,0 +1,24 @@
+{
+  "name": "exhibita",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Exhibita: chargeback defense for Jira Service Management. Every claim, an exhibit.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.7",
+    "@vitest/coverage-v8": "^3.2.7",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}
