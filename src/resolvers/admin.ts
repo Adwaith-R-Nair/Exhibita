@@ -7,6 +7,7 @@ import Resolver from '@forge/resolver';
 import { getConfig, rotateWebhookSecret, saveConfig, type AppConfig } from '../lib/config';
 import { createServiceProject, ensureProjectRoles, findProject } from '../lib/jira';
 import { runValidationSuite } from '../core/validation/suite';
+import { checkDemo } from '../lib/demo-check';
 import { removeDemoStep } from '../lib/remove-demo';
 import { runSeedStep, seedProgress, startSeed } from '../lib/seed';
 import { audit, recentAudit, runMigrations } from '../lib/sql';
@@ -109,6 +110,8 @@ resolver.define('seedStep', async ({ context }) => {
   if (!context.accountId || !localId) throw new Error('Run demo setup from the Exhibita setup page as a site admin.');
   return runSeedStep({ accountId: context.accountId, localId });
 });
+
+resolver.define('checkDemo', async () => checkDemo());
 
 resolver.define('removeStep', async ({ context }) => {
   const result = await removeDemoStep();

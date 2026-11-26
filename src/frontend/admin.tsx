@@ -39,6 +39,13 @@ interface SeedProgress {
   error: string | null;
 }
 
+interface DemoCheck {
+  total: number;
+  found: number;
+  matching: number;
+  mismatches: { issueKey: string | null; externalId: string; scenario: string; expected: string; actual: string }[];
+}
+
 interface ValidationReport {
   passed: number;
   total: number;
@@ -73,6 +80,8 @@ function DemoData() {
   };
 
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [demoCheck, setDemoCheck] = useState<DemoCheck | null>(null);
   const [removeMessage, setRemoveMessage] = useState<string | null>(null);
 
   const remove = async () => {
@@ -121,6 +130,39 @@ function DemoData() {
           <Text>{n}</Text>
         </SectionMessage>
       ))}
+      {done && !running && (
+        <Stack space="space.075">
+          <Box>
+            <Button
+              onClick={async () => {
+                setChecking(true);
+                try {
+                  setDemoCheck(await call<DemoCheck | null>('checkDemo'));
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setChecking(false);
+                }
+              }}
+              isDisabled={checking}
+            >
+              {checking ? 'Checking every demo dispute…' : 'Check the demo disputes'}
+            </Button>
+          </Box>
+          {demoCheck && (
+            <SectionMessage appearance={demoCheck.mismatches.length === 0 ? 'success' : 'warning'}>
+              <Text>
+                {demoCheck.matching} of {demoCheck.total} demo disputes reach the recommendation the scenario intends.
+              </Text>
+              {demoCheck.mismatches.slice(0, 10).map((m) => (
+                <Text key={m.externalId}>
+                  {m.issueKey ?? m.externalId}: expected {m.expected}, got {m.actual} ({m.scenario})
+                </Text>
+              ))}
+            </SectionMessage>
+          )}
+        </Stack>
+      )}
       {(done || progress?.status === 'failed') && !running && (
         <Box>
           {confirmRemove ? (
