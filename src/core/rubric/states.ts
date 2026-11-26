@@ -9,6 +9,7 @@ import type { EvidenceKind } from '../types';
 export const KIND_LABEL: Record<EvidenceKind, string> = { fact: 'Record', inference: 'Inference' };
 
 const PHRASES: Record<string, string> = {
+  'voided-settled-by-dispute': 'cancelled because the accepted chargeback settles it',
   'approved-not-completed': 'approved but never completed',
   'partial-approved-not-completed': 'approved for part of the amount but never completed',
   'completed-date-unknown': 'completed, date unknown',

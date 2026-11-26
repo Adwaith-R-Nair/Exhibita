@@ -100,7 +100,9 @@ export interface ChargeRow {
  * A refund's lifecycle. "approved" means a person said yes; only "completed" means money moved.
  * An approved refund that never completed is owed to the customer.
  */
-export type RefundStatus = 'requested' | 'approved' | 'initiated' | 'completed' | 'declined';
+export type RefundStatus = 'requested' | 'approved' | 'initiated' | 'completed' | 'declined' | 'voided';
+// voided: cancelled because the disputed amount was settled by accepting the chargeback, so a later
+// replay of stuck refunds cannot pay the customer twice (D-17, review D).
 
 export interface RefundRow {
   /** REF-1001 */

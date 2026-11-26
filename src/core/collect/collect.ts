@@ -166,6 +166,9 @@ function refundState(r: ObservedRefund, receivedAt: number | null, disputed: num
       return { state: 'declined-per-policy', at: r.approvedAt ?? r.requestedAt };
     case 'requested':
       return { state: 'requested', at: r.requestedAt };
+    case 'voided':
+      // Cancelled because the chargeback was accepted and settles the amount: nothing is owed by refund.
+      return { state: 'voided-settled-by-dispute', at: r.approvedAt ?? r.requestedAt };
   }
 }
 
