@@ -1,0 +1,139 @@
+# Exhibita: chargeback defense for Jira Service Management. Every claim, an exhibit.
+# Function keys are 23 characters or fewer (Forge limit).
+modules:
+  jira:issuePanel:
+    - key: exhibita-evidence-panel
+      resource: panel
+      resolver:
+        function: panel-fn
+      render: native
+      title: Exhibita evidence
+      icon: resource:icons;exhibit.svg
+
+  jira:adminPage:
+    - key: exhibita-admin
+      resource: admin
+      resolver:
+        function: admin-fn
+      render: native
+      title: Exhibita setup
+
+  jira:workflowValidator:
+    - key: exhibita-submit-validator
+      name: Exhibita evidence complete
+      description: Blocks the transition until every required exhibit for the dispute's reason is backed by evidence. Fails closed.
+      function: validator-fn
+
+  webtrigger:
+    - key: exhibita-dispute-intake
+      function: intake-fn
+      urlFormat: v2
+      response:
+        type: dynamic
+
+  consumer:
+    - key: exhibita-intake-consumer
+      queue: exhibita-intake
+      function: intake-consumer-fn
+
+  trigger:
+    - key: exhibita-lifecycle
+      function: lifecycle-fn
+      events:
+        - avi:forge:installed:app
+        - avi:forge:upgraded:app
+
+  rovo:agent:
+    - key: exhibita-analyst
+      name: Exhibita Analyst
+      description: Explains and challenges chargeback defenses using cited evidence from Jira, JSM and Confluence. Never decides; never gives a win percentage.
+      prompt: resource:agent-prompts;analyst.md
+      conversationStarters:
+        - Should we fight or accept this dispute?
+        - Argue the cardholder's side of this dispute
+        - What evidence is still missing?
+      actions:
+        - get-dispute-context
+        - evaluate-rubric
+
+  action:
+    - key: get-dispute-context
+      name: Get dispute context
+      function: get-context-fn
+      actionVerb: GET
+      description: Returns a dispute's reason, amount, respond-by date and every evidence item (exhibit letter, Fact or Inference, source and timestamp) for a Jira work item key.
+      inputs:
+        issueKey:
+          title: Work item key
+          type: string
+          required: false
+          description: The Jira key of the dispute, for example DSP-12. Defaults to the work item the user is viewing.
+    - key: evaluate-rubric
+      name: Evaluate dispute rubric
+      function: evaluate-fn
+      actionVerb: GET
+      description: Runs Exhibita's deterministic reason-code rubric and returns each requirement's status and rule, the evidence coverage, and the fight, accept or investigate recommendation with its reason.
+      inputs:
+        issueKey:
+          title: Work item key
+          type: string
+          required: false
+          description: The Jira key of the dispute, for example DSP-12. Defaults to the work item the user is viewing.
+
+  rovo:mcp:
+    - key: exhibita-mcp
+      name: Exhibita
+      tools:
+        - get-dispute-context
+        - evaluate-rubric
+
+  sql:
+    - key: main
+      engine: mysql
+
+  function:
+    - key: panel-fn
+      handler: index.panelHandler
+    - key: admin-fn
+      handler: index.adminHandler
+    - key: validator-fn
+      handler: index.validateSubmit
+    - key: intake-fn
+      handler: index.handleIntake
+    - key: intake-consumer-fn
+      handler: index.processIntake
+      timeoutSeconds: 120
+    - key: lifecycle-fn
+      handler: index.onLifecycle
+    - key: get-context-fn
+      handler: index.getDisputeContext
+    - key: evaluate-fn
+      handler: index.evaluateRubric
+
+resources:
+  - key: panel
+    path: src/frontend/panel.tsx
+  - key: admin
+    path: src/frontend/admin.tsx
+  - key: icons
+    path: static/icons
+  - key: agent-prompts
+    path: static/prompts
+
+permissions:
+  scopes:
+    - read:jira-work
+    - write:jira-work
+    - read:jira-user
+    - manage:jira-configuration
+    - manage:jira-project
+    - storage:app
+
+# app.rovo metadata (tag, description, keywords) is required for rovo:mcp apps from 5 Jan 2027,
+# but CLI 16 / @forge/manifest 13.9.1 rejects it. Re-add once the schema accepts it. See docs/BUILD_LOG.md.
+app:
+  id: ari:cloud:ecosystem::app/00000000-0000-0000-0000-000000000000
+  runtime:
+    name: nodejs24.x
+    memoryMB: 256
+    architecture: arm64
