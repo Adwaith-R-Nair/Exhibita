@@ -169,14 +169,14 @@ export async function writeDisputeRecord(issueKey: string, record: DisputeRecord
   if (!res.ok) throw new JiraError(`Writing dispute record on ${issueKey}`, res.status, await res.text());
 }
 
-/** Find the work item already created for a processor dispute id, so redelivered webhooks don't duplicate it. */
-/** True if the work item still exists (it may have been deleted since we recorded it). */
-export async function issueExists(issueKey: string, as: Requester = api.asApp()): Promise<boolean> {
+/** The work item's numeric id, or null if it doesn't exist (it may have been deleted since we recorded it). */
+export async function getIssueId(issueKey: string, as: Requester = api.asApp()): Promise<string | null> {
   const res = await as.requestJira(route`/rest/api/3/issue/${issueKey}?fields=summary`);
-  if (res.status === 404) return false;
-  await json(res, `Reading ${issueKey}`);
-  return true;
+  if (res.status === 404) return null;
+  return (await json<{ id: string }>(res, `Reading ${issueKey}`)).id;
 }
+
+/** Find the work item already created for a processor dispute id, so redelivered webhooks don't duplicate it. */
 
 export async function findIssueByExternalId(projectKey: string, externalId: string, as: Requester = api.asApp()): Promise<string | null> {
   const quoted = (v: string) => `"${v.replace(/[\\"]/g, (c) => `\\${c}`)}"`;

@@ -12,12 +12,14 @@ import ForgeReconciler, {
   Tooltip,
 } from '@forge/react';
 import { call } from './call';
+import { COPY_CHANGED_MESSAGE, UNTRUSTED_RECORD_MESSAGE } from '../core/record';
 import type { CheckResult, Dispute, Evaluation, EvidenceItem } from '../core/types';
 
 type PanelState =
   | { state: 'no-issue' }
   | { state: 'not-a-dispute'; issueKey: string }
-  | { state: 'ready'; issueKey: string; dispute: Dispute; evidence: EvidenceItem[]; evaluation: Evaluation };
+  | { state: 'unverified'; issueKey: string }
+  | { state: 'ready'; issueKey: string; copyChanged: boolean; dispute: Dispute; evidence: EvidenceItem[]; evaluation: Evaluation };
 
 const VERDICT = {
   fight: { text: 'Fight', appearance: 'success' },
@@ -68,6 +70,13 @@ function App() {
     );
   }
   if (!data) return <Spinner label="Checking the evidence" />;
+  if (data.state === 'unverified') {
+    return (
+      <SectionMessage appearance="error" title="Exhibita can't trust this record">
+        <Text>{UNTRUSTED_RECORD_MESSAGE.unverified} Submission is blocked.</Text>
+      </SectionMessage>
+    );
+  }
   if (data.state !== 'ready') {
     return <Text>This work item isn't an Exhibita dispute. Disputes arrive through the dispute webhook.</Text>;
   }
@@ -79,6 +88,11 @@ function App() {
 
   return (
     <Stack space="space.200">
+      {data.copyChanged && (
+        <SectionMessage appearance="warning" title="Record edited outside Exhibita">
+          <Text>{COPY_CHANGED_MESSAGE}</Text>
+        </SectionMessage>
+      )}
       <Stack space="space.050">
         <Inline space="space.100" alignBlock="center">
           <Lozenge appearance={verdict.appearance} isBold>

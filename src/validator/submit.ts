@@ -1,10 +1,10 @@
 // jira:workflowValidator on "Submit to network" (D-07).
 // Passes only when the rubric says fight and every required exhibit is present. Fails closed.
 
-import { evaluateIssue } from '../lib/evaluate-issue';
+import { evaluateIssue, UNTRUSTED_RECORD_MESSAGE } from '../lib/evaluate-issue';
 
 interface ValidatorEvent {
-  issue?: { key?: string };
+  issue?: { key?: string; id?: string | number };
 }
 
 interface ValidatorResult {
@@ -17,9 +17,10 @@ export async function validateSubmit(event: ValidatorEvent): Promise<ValidatorRe
   if (!issueKey) return { result: false, errorMessage: 'Exhibita could not identify this work item, so submission is blocked.' };
 
   try {
-    const loaded = await evaluateIssue(issueKey);
-    if (!loaded) {
-      return { result: false, errorMessage: 'This work item has no Exhibita dispute record, so there is no evidence to submit.' };
+    // Only Exhibita's stored copy counts; the work item copy can be edited by anyone with edit rights (D-11).
+    const loaded = await evaluateIssue(issueKey, event.issue?.id !== undefined ? String(event.issue.id) : undefined);
+    if (!loaded.record) {
+      return { result: false, errorMessage: `${UNTRUSTED_RECORD_MESSAGE[loaded.trust === 'unverified' ? 'unverified' : 'none']} Submission is blocked.` };
     }
     const { evaluation } = loaded;
     if (evaluation.canSubmit) return { result: true };

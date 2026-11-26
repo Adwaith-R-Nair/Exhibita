@@ -1,6 +1,6 @@
 // Rovo agent and MCP tools. All GET: they read and explain, never change anything (D-06).
 
-import { evaluateIssue } from '../lib/evaluate-issue';
+import { COPY_CHANGED_MESSAGE, evaluateIssue, UNTRUSTED_RECORD_MESSAGE, type IssueEvaluation } from '../lib/evaluate-issue';
 
 interface ActionPayload {
   issueKey?: string;
@@ -9,17 +9,23 @@ interface ActionPayload {
 
 const issueKeyOf = (p: ActionPayload): string | null => p.issueKey?.trim().toUpperCase() || p.context?.jira?.issueKey || null;
 
-const notFound = (issueKey: string | null) => ({
-  error: issueKey ? `${issueKey} has no Exhibita dispute record.` : 'Tell me which dispute to look at, for example DSP-12.',
+const notFound = (loaded: IssueEvaluation | null) => ({
+  error: loaded
+    ? `${loaded.issueKey}: ${UNTRUSTED_RECORD_MESSAGE[loaded.trust === 'unverified' ? 'unverified' : 'none']}`
+    : 'Tell me which dispute to look at, for example DSP-12.',
 });
+
+/** Tell the agent when the work item's copy was edited, so it can say so instead of trusting that copy. */
+const recordNote = (loaded: IssueEvaluation) => (loaded.trust === 'copy-changed' ? { recordWarning: COPY_CHANGED_MESSAGE } : {});
 
 export async function getDisputeContext(payload: ActionPayload) {
   const issueKey = issueKeyOf(payload);
   const loaded = issueKey ? await evaluateIssue(issueKey) : null;
-  if (!loaded) return notFound(issueKey);
+  if (!loaded?.record) return notFound(loaded);
   const { dispute, evidence } = loaded.record;
   return {
     issueKey,
+    ...recordNote(loaded),
     dispute: { ...dispute, amount: `${(dispute.amount / 100).toFixed(2)} ${dispute.currency}` },
     reason: { label: loaded.evaluation.reasonLabel, code: loaded.evaluation.reasonCode },
     evidence: evidence.map((e, i) => ({
@@ -38,10 +44,11 @@ export async function getDisputeContext(payload: ActionPayload) {
 export async function evaluateRubric(payload: ActionPayload) {
   const issueKey = issueKeyOf(payload);
   const loaded = issueKey ? await evaluateIssue(issueKey) : null;
-  if (!loaded) return notFound(issueKey);
+  if (!loaded?.record) return notFound(loaded);
   const e = loaded.evaluation;
   return {
     issueKey,
+    ...recordNote(loaded),
     recommendation: e.recommendation,
     why: e.why,
     coverage: `${e.coverage.met} of ${e.coverage.total} required items met (${e.coverage.label})`,

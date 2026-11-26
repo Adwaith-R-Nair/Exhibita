@@ -8,7 +8,8 @@ import { RECORD_SCHEMA_VERSION, type DisputeRecord } from '../core/record';
 import { findReason } from '../core/rubric/reasons';
 import type { Dispute } from '../core/types';
 import { getConfig } from '../lib/config';
-import { createIssue, findIssueByExternalId, findProject, issueExists, pickIssueType, writeDisputeRecord } from '../lib/jira';
+import { createIssue, findIssueByExternalId, findProject, getIssueId, pickIssueType } from '../lib/jira';
+import { readStoredRecord, saveRecord } from '../lib/records';
 
 export const DISPUTE_CREATED_CHANNEL = 'exhibita-dispute-created';
 
@@ -30,10 +31,19 @@ export async function processIntake(event: AsyncEvent): Promise<void> {
   // records written before this key existed (the search index can lag by a few seconds).
   const seenKey = `intake:${dispute.externalId}`;
   const seen = await kvs.get<{ issueKey: string }>(seenKey);
-  const seenLive = seen?.issueKey && (await issueExists(seen.issueKey)) ? seen.issueKey : null;
+  const seenLive = seen?.issueKey && (await getIssueId(seen.issueKey)) ? seen.issueKey : null;
   const existing = seenLive ?? (await findIssueByExternalId(config.projectKey, dispute.externalId));
+  const fresh: DisputeRecord = { schemaVersion: RECORD_SCHEMA_VERSION, dispute, evidence: [], raw, collectedAt: null };
   if (existing) {
-    console.log(`Dispute ${dispute.externalId} already recorded on ${existing}; skipping`);
+    // A redelivery restores the stored record if it is missing (D-11). The webhook is authenticated,
+    // so its dispute details can be trusted; evidence starts empty and is collected again.
+    const id = await getIssueId(existing);
+    if (id && !(await readStoredRecord(id))) {
+      await saveRecord({ id, key: existing }, fresh);
+      console.log(`Restored the stored record for ${dispute.externalId} on ${existing}`);
+    } else {
+      console.log(`Dispute ${dispute.externalId} already recorded on ${existing}; skipping`);
+    }
     return;
   }
 
@@ -54,8 +64,7 @@ export async function processIntake(event: AsyncEvent): Promise<void> {
     labels: ['exhibita', 'dispute'],
   });
 
-  const record: DisputeRecord = { schemaVersion: RECORD_SCHEMA_VERSION, dispute, evidence: [], raw, collectedAt: null };
-  await writeDisputeRecord(issue.key, record);
+  await saveRecord(issue, fresh);
   await kvs.set(seenKey, { issueKey: issue.key });
 
   await publishGlobal(DISPUTE_CREATED_CHANNEL, JSON.stringify({ issueKey: issue.key, externalId: dispute.externalId }));
