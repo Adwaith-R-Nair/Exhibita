@@ -66,6 +66,9 @@ export interface EvidenceMeta {
   windowEnd?: string | null;
   /** Customer messages: the exact phrase a classifier label came from. */
   quote?: string;
+  /** An explicit link (not a timing guess) to the incident or deploy behind this fact. */
+  linkedIncident?: string;
+  linkedDeploy?: string;
 }
 
 export type ReasonKey = 'visa-13.1' | 'visa-13.3' | 'visa-12.6.1' | 'visa-10.4' | 'visa-13.2';
