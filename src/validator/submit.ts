@@ -23,6 +23,9 @@ export async function validateSubmit(event: ValidatorEvent): Promise<ValidatorRe
       return { result: false, errorMessage: `${UNTRUSTED_RECORD_MESSAGE[loaded.trust === 'unverified' ? 'unverified' : 'none']} Submission is blocked.` };
     }
     const { evaluation, verdict, challenge } = loaded;
+    if (verdict.incomplete) {
+      return { result: false, errorMessage: 'Exhibita has not finished reading every evidence source for this dispute, so submission is blocked. Use "Collect evidence again" in the Exhibita panel, then try again.' };
+    }
     if (verdict.canSubmit) return { result: true };
     if (verdict.recommendation === 'accept') {
       return { result: false, errorMessage: `Exhibita recommends accepting this dispute: ${verdict.why}` };

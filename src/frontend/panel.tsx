@@ -17,7 +17,7 @@ import { realtime } from '@forge/bridge';
 import { call } from './call';
 import type { Finding } from '../core/challenge/challenge';
 import { COPY_CHANGED_MESSAGE, UNTRUSTED_RECORD_MESSAGE } from '../core/record';
-import { describeState } from '../core/rubric/states';
+import { describeState, KIND_LABEL } from '../core/rubric/states';
 import type { CheckResult, Dispute, Evaluation, EvidenceItem, Recommendation } from '../core/types';
 
 interface Verdict {
@@ -68,7 +68,8 @@ const SEVERITY = {
 const STAGE_TEXT: Record<string, string> = {
   order: 'Read the order and payment records',
   tickets: 'Read the customer\'s support tickets',
-  refunds: 'Read refunds and incident impacts',
+  refunds: 'Read our refund records',
+  settlements: 'Checked our refunds against the processor',
   incidents: 'Read incidents and deploys',
   policies: 'Reading policies',
 };
@@ -109,7 +110,7 @@ function Exhibit({ item, index }: { item: EvidenceItem; index: number }) {
         <Text>
           {EVIDENCE_LABEL[item.type] ?? item.type}: {describeState(item.state)}
         </Text>
-        <Lozenge appearance={item.kind === 'inference' ? 'new' : 'default'}>{item.kind === 'inference' ? 'Inference' : 'Fact'}</Lozenge>
+        <Lozenge appearance={item.kind === 'inference' ? 'new' : 'default'}>{KIND_LABEL[item.kind]}</Lozenge>
       </Inline>
       {item.meta?.quote && <Text>"{item.meta.quote}"</Text>}
       <Inline space="space.100">
@@ -215,7 +216,11 @@ function App() {
     <Stack space="space.200">
       {(stage || !data.collectedAt) && (
         <SectionMessage appearance="information" title="Collecting evidence">
-          <Text>{stage ? `${STAGE_TEXT[stage] ?? stage}. More sources to come.` : 'Evidence is being collected from the sources.'}</Text>
+          <Text>
+            {stage
+              ? `${STAGE_TEXT[stage] ?? stage}. More sources to come.`
+              : 'Not every source has been read yet, or one failed. Submission stays blocked until collection finishes; use "Collect evidence again" if this persists.'}
+          </Text>
         </SectionMessage>
       )}
       {data.copyChanged && (

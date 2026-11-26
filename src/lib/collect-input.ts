@@ -101,13 +101,17 @@ interface LinkField {
   outwardIssue?: { key: string };
 }
 
-/** Keys of issues joined to this one by a "causes" link, in either direction, filtered by project. */
+/**
+ * Keys of the issues that cause this one, in the given project. On a fetched issue, a link carrying an
+ * inwardIssue reads "this issue <inward verb> inwardIssue", so for the Causes type that is "this issue is
+ * caused by inwardIssue". Links the other way (this issue causes something) are not causes of it.
+ */
 function causalLinks(issue: SearchIssue, projectKey: string | null): string[] {
   const links = (issue.fields.issuelinks as LinkField[] | undefined) ?? [];
   return links
-    .filter((l) => l.type.outward.toLowerCase() === 'causes')
-    .map((l) => l.inwardIssue?.key ?? l.outwardIssue?.key)
-    .filter((k): k is string => !!k && (!projectKey || k.startsWith(`${projectKey}-`)));
+    .filter((l) => l.type.outward.toLowerCase() === 'causes' && l.inwardIssue)
+    .map((l) => l.inwardIssue!.key)
+    .filter((k) => !projectKey || k.startsWith(`${projectKey}-`));
 }
 
 const byTimeThenKey = <T>(at: (x: T) => string, key: (x: T) => string) => (a: T, b: T) =>
@@ -131,7 +135,7 @@ async function readTickets(sources: SourcesConfig, customerId: string, base: str
     const linked = causalLinks(issue, sources.incidentProjectKey)[0];
     if (prop?.refundId && linked && !incidentByRefund.has(prop.refundId)) incidentByRefund.set(prop.refundId, linked);
     const url = browse(base, issue.key);
-    return { key: issue.key, ...(url ? { url } : {}), createdAt: prop?.messages[0]?.at ?? String(issue.fields.created), messages };
+    return { key: issue.key, ...(url ? { url } : {}), orderId: prop?.orderId ?? null, createdAt: prop?.messages[0]?.at ?? String(issue.fields.created), messages };
   });
   return { tickets: tickets.sort(byTimeThenKey((t) => t.createdAt, (t) => t.key)), incidentByRefund };
 }
@@ -155,15 +159,6 @@ async function readIncidents(sources: SourcesConfig, base: string | null): Promi
   });
 }
 
-/** Orders this customer has disputed, from the dispute records in the disputes project. */
-async function disputedOrders(projectKey: string, customerId: string): Promise<Set<string>> {
-  const issues = await search(`project = ${quote(projectKey)} AND issue.property[exhibita].dispute.customer = ${quote(customerId)}`, ['summary'], ['exhibita'], 100);
-  return new Set(
-    issues
-      .map((i) => (i.properties?.exhibita as { dispute?: { orderId?: string | null } } | undefined)?.dispute?.orderId)
-      .filter((o): o is string => !!o),
-  );
-}
 
 const overlaps = (purchasedAt: string, start: string, end: string | null) => {
   const t = Date.parse(purchasedAt);
@@ -237,14 +232,14 @@ export async function buildCollectInput(dispute: Dispute, disputesProjectKey: st
     async order() {
       if (!order) return;
       const disputedCharge = dispute.chargeId ? await getCharge(dispute.chargeId) : null;
-      const [p, c, disputed] = await Promise.all([
+      const [p, c, prior] = await Promise.all([
         getProduct(order.sku),
         getChargesFor(order, dispute.amount, disputedCharge?.chargedAt ?? order.purchasedAt),
-        disputedOrders(disputesProjectKey, order.customerId),
+        getPriorOrders(order),
       ]);
       product = p;
       charges = c;
-      priorOrders = await getPriorOrders(order, disputed);
+      priorOrders = prior;
     },
     async tickets() {
       if (order) ticketData = await readTickets(sources, order.customerId, base);
@@ -256,6 +251,9 @@ export async function buildCollectInput(dispute: Dispute, disputesProjectKey: st
       const orderCharges = charges.filter((c) => c.orderId === order.id).map((c) => c.id);
       impacts = await getImpacts(refundRows.map((r) => r.id), orderCharges);
     },
+    // The processor's refunded amounts are on the charges read with the order; this stage only marks
+    // the point where the panel starts showing the reconciliation against them.
+    async settlements() {},
     async incidents() {
       if (order) allIncidents = await readIncidents(sources, base);
     },

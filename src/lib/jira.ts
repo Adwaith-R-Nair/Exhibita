@@ -132,7 +132,7 @@ export async function pickIssueType(projectId: string, as: Requester = api.asApp
 }
 
 export async function createIssue(
-  fields: { projectId: string; issueTypeId: string; summary: string; description: string; labels?: string[] },
+  fields: { projectId: string; issueTypeId: string; summary: string; description: string; labels?: string[]; duedate?: string },
   as: Requester = api.asApp(),
 ): Promise<{ id: string; key: string }> {
   const res = await as.requestJira(route`/rest/api/3/issue`, {
@@ -144,6 +144,7 @@ export async function createIssue(
         issuetype: { id: fields.issueTypeId },
         summary: fields.summary,
         labels: fields.labels ?? [],
+        ...(fields.duedate ? { duedate: fields.duedate } : {}),
         description: {
           type: 'doc',
           version: 1,

@@ -11,13 +11,17 @@ export interface Verdict {
   canSubmit: boolean;
   /** True when the challenge changed the rubric's recommendation (for example Fight to Accept). */
   changed: boolean;
+  /** True while some sources are unread or failed: nothing may be submitted on a partial record (review A1). */
+  incomplete: boolean;
 }
 
-export function finalVerdict(evaluation: Evaluation, challenge: ChallengeResult): Verdict {
+export function finalVerdict(evaluation: Evaluation, challenge: ChallengeResult, options: { collectionComplete?: boolean } = {}): Verdict {
+  const complete = options.collectionComplete ?? true;
   return {
     recommendation: challenge.recommendation,
     why: challenge.why,
-    canSubmit: evaluation.canSubmit && challenge.recommendation === 'fight',
+    canSubmit: complete && evaluation.canSubmit && challenge.recommendation === 'fight',
     changed: challenge.changed,
+    incomplete: !complete,
   };
 }

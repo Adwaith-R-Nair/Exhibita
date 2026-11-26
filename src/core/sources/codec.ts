@@ -63,11 +63,13 @@ export const ORDERS: TableCodec<OrderRow> = {
     'id', 'customer_id', 'sku', 'amount', 'currency', 'purchased_at', 'ip', 'device_id', 'terms_version',
     'carrier', 'tracking', 'ship_status', 'delivered_at', 'address_match', 'signed_by', 'signature_name_match',
     'description_matches', 'three_ds', 'avs', 'cvv', 'subscription_cancelled_at',
+    'card_fingerprint', 'card_network', 'account_id', 'ship_address_hash', 'fraud_reported',
   ],
   toParams: (r) => [
     r.id, r.customerId, r.sku, r.amount, r.currency, toSqlTime(r.purchasedAt), r.ip, r.deviceId, r.termsAcceptedVersion,
     r.carrier, r.tracking, r.shipStatus, toSqlTime(r.deliveredAt), bool(r.addressMatch), r.signedBy, bool(r.signatureNameMatch),
     bool(r.descriptionMatches), r.threeDS, r.avs, r.cvv, toSqlTime(r.subscriptionCancelledAt),
+    r.cardFingerprint, r.cardNetwork, r.accountId, r.shippingAddressHash, bool(r.fraudReported),
   ],
   fromDb: (d) => ({
     id: req(d.id, 'id'),
@@ -91,13 +93,18 @@ export const ORDERS: TableCodec<OrderRow> = {
     avs: req(d.avs, 'avs') as OrderRow['avs'],
     cvv: req(d.cvv, 'cvv') as OrderRow['cvv'],
     subscriptionCancelledAt: fromSqlTime(d.subscription_cancelled_at),
+    cardFingerprint: str(d.card_fingerprint),
+    cardNetwork: (str(d.card_network) ?? 'unknown') as OrderRow['cardNetwork'],
+    accountId: str(d.account_id),
+    shippingAddressHash: str(d.ship_address_hash),
+    fraudReported: fromBool(d.fraud_reported) ?? false,
   }),
 };
 
 export const CHARGES: TableCodec<ChargeRow> = {
   table: 'charges',
-  columns: ['id', 'order_id', 'customer_id', 'amount', 'currency', 'charged_at', 'refunded_at'],
-  toParams: (r) => [r.id, r.orderId, r.customerId, r.amount, r.currency, toSqlTime(r.chargedAt), toSqlTime(r.refundedAt)],
+  columns: ['id', 'order_id', 'customer_id', 'amount', 'currency', 'charged_at', 'refunded_at', 'amount_refunded'],
+  toParams: (r) => [r.id, r.orderId, r.customerId, r.amount, r.currency, toSqlTime(r.chargedAt), toSqlTime(r.refundedAt), r.amountRefunded],
   fromDb: (d) => ({
     id: req(d.id, 'id'),
     orderId: req(d.order_id, 'order_id'),
@@ -106,6 +113,7 @@ export const CHARGES: TableCodec<ChargeRow> = {
     currency: req(d.currency, 'currency'),
     chargedAt: req(fromSqlTime(d.charged_at), 'charged_at'),
     refundedAt: fromSqlTime(d.refunded_at),
+    amountRefunded: money(d.amount_refunded ?? 0),
   }),
 };
 
@@ -181,3 +189,29 @@ export function insertStatement<Row>(codec: TableCodec<Row>, rows: readonly Row[
     params: rows.flatMap((r) => codec.toParams(r)),
   };
 }
+
+/**
+ * Exhibita's own ledger of disputes it has taken in, keyed by the processor's dispute id. Inserting a row
+ * is the atomic claim that stops two deliveries of one dispute creating two work items (review A4), and
+ * it is the trusted list of disputed orders for Compelling Evidence 3.0 (review A5).
+ */
+export interface DisputeLedgerRow {
+  externalId: string;
+  orderId: string | null;
+  customerId: string | null;
+  issueKey: string | null;
+  receivedAt: string;
+}
+
+export const DISPUTES: TableCodec<DisputeLedgerRow> = {
+  table: 'disputes',
+  columns: ['external_id', 'order_id', 'customer_id', 'issue_key', 'received_at'],
+  toParams: (r) => [r.externalId, r.orderId, r.customerId, r.issueKey, toSqlTime(r.receivedAt)],
+  fromDb: (d) => ({
+    externalId: req(d.external_id, 'external_id'),
+    orderId: str(d.order_id),
+    customerId: str(d.customer_id),
+    issueKey: str(d.issue_key),
+    receivedAt: req(fromSqlTime(d.received_at), 'received_at'),
+  }),
+};

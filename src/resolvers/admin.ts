@@ -9,6 +9,7 @@ import { createServiceProject, ensureProjectRoles, findProject } from '../lib/ji
 import { runValidationSuite } from '../core/validation/suite';
 import { checkDemo } from '../lib/demo-check';
 import { removeDemoStep } from '../lib/remove-demo';
+import { requireSiteAdmin } from '../lib/permissions';
 import { runSeedStep, seedProgress, startSeed } from '../lib/seed';
 import { audit, recentAudit, runMigrations } from '../lib/sql';
 
@@ -30,20 +31,28 @@ async function check(name: string, fn: () => Promise<string>): Promise<CheckResu
 
 const resolver = new Resolver();
 
-resolver.define('getSetup', async () => ({
-  config: await getConfig(),
-  webhookUrl: await webTrigger.getUrl('exhibita-dispute-intake').catch(() => null),
-}));
+resolver.define('getSetup', async () => {
+  await requireSiteAdmin();
+  return {
+    config: await getConfig(),
+    webhookUrl: await webTrigger.getUrl('exhibita-dispute-intake').catch(() => null),
+  };
+});
 
-resolver.define('saveSetup', async ({ payload }: { payload: Partial<AppConfig> }) => ({ config: await saveConfig(payload) }));
+resolver.define('saveSetup', async ({ payload }: { payload: Partial<AppConfig> }) => {
+  await requireSiteAdmin();
+  return { config: await saveConfig(payload) };
+});
 
 resolver.define('rotateSecret', async ({ context }) => {
+  await requireSiteAdmin();
   const secret = await rotateWebhookSecret();
   await audit(context.accountId ?? 'unknown', 'rotate-webhook-secret', null).catch(() => undefined);
   return { secret };
 });
 
 resolver.define('createProject', async ({ context }) => {
+  await requireSiteAdmin();
   const config = await getConfig();
   const existing = await findProject(config.projectKey);
   const project = existing ?? (await createServiceProject(config.projectKey, 'Disputes'));
@@ -53,6 +62,7 @@ resolver.define('createProject', async ({ context }) => {
 });
 
 resolver.define('runChecks', async ({ context }) => {
+  await requireSiteAdmin();
   const config = await getConfig();
   const results = await Promise.all([
     check('Key-value storage', async () => {
@@ -101,19 +111,25 @@ resolver.define('runValidation', async () => runValidationSuite());
 resolver.define('seedStatus', async () => seedProgress());
 
 resolver.define('seedStart', async ({ context }) => {
+  await requireSiteAdmin();
   await audit(context.accountId ?? 'unknown', 'demo-setup-start', null).catch(() => undefined);
   return startSeed();
 });
 
 resolver.define('seedStep', async ({ context }) => {
+  await requireSiteAdmin();
   const localId = (context as { localId?: string }).localId;
   if (!context.accountId || !localId) throw new Error('Run demo setup from the Exhibita setup page as a site admin.');
   return runSeedStep({ accountId: context.accountId, localId });
 });
 
-resolver.define('checkDemo', async () => checkDemo());
+resolver.define('checkDemo', async () => {
+  await requireSiteAdmin();
+  return checkDemo();
+});
 
 resolver.define('removeStep', async ({ context }) => {
+  await requireSiteAdmin();
   const result = await removeDemoStep();
   if (result.status === 'done') await audit(context.accountId ?? 'unknown', 'demo-remove', null).catch(() => undefined);
   return result;

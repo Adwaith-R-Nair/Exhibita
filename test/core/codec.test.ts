@@ -9,6 +9,7 @@ const order: OrderRow = {
   carrier: 'Ground courier', tracking: 'GC123', shipStatus: 'delivered', deliveredAt: '2026-10-04T09:30:00.000Z',
   addressMatch: true, signedBy: null, signatureNameMatch: null, descriptionMatches: false,
   threeDS: 'not-attempted', avs: 'match', cvv: 'unavailable', subscriptionCancelledAt: null,
+  cardFingerprint: 'fp_1', cardNetwork: 'visa', accountId: null, shippingAddressHash: 'addr_1', fraudReported: false,
 };
 
 /** What the database hands back: column names, booleans as 0/1, DATETIME as text. */
@@ -39,7 +40,7 @@ describe('row codecs', () => {
   });
 
   it('round-trips charges and refunds', () => {
-    const charge = { id: 'ch_1', orderId: 'ORD-1', customerId: 'cus_1', amount: minor(4900), currency: 'USD', chargedAt: '2026-10-01T00:00:00.000Z', refundedAt: null };
+    const charge = { id: 'ch_1', orderId: 'ORD-1', customerId: 'cus_1', amount: minor(4900), currency: 'USD', chargedAt: '2026-10-01T00:00:00.000Z', refundedAt: null, amountRefunded: minor(0) };
     expect(CHARGES.fromDb(asDb(CHARGES, charge))).toEqual(charge);
     const refund = {
       id: 'REF-1', orderId: 'ORD-1', chargeId: 'ch_1', amount: minor(4900), currency: 'USD', status: 'approved' as const,

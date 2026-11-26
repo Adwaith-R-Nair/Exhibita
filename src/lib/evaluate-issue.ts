@@ -29,6 +29,7 @@ export async function evaluateIssue(issueKey: string, issueId?: string): Promise
     signatureThreshold: minor(config.signatureThresholdMinor),
   });
   const challenge = challengeDispute(loaded.record.dispute, loaded.record.evidence, evaluation);
-  const verdict = finalVerdict(evaluation, challenge);
+  // A record saved part way through collection, or left that way by a failed source, has collectedAt null.
+  const verdict = finalVerdict(evaluation, challenge, { collectionComplete: loaded.record.collectedAt !== null });
   return { issueKey, trust: loaded.trust, record: loaded.record, evaluation, challenge, verdict };
 }

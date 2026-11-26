@@ -43,3 +43,15 @@ describe('finalVerdict', () => {
     expect(verdict).toMatchObject({ recommendation: 'accept', canSubmit: false });
   });
 });
+
+describe('finalVerdict while evidence is still being collected', () => {
+  it('never allows submission until every source has been read (review A1)', () => {
+    const evidence = [ev('POD', 'delivery', 'delivered'), ev('REF', 'refund', 'none')];
+    const evaluation = evaluateDispute(dispute, evidence);
+    const challenge = challengeDispute(dispute, evidence, evaluation);
+    expect(finalVerdict(evaluation, challenge).canSubmit).toBe(true);
+    const partial = finalVerdict(evaluation, challenge, { collectionComplete: false });
+    expect(partial.canSubmit).toBe(false);
+    expect(partial.incomplete).toBe(true);
+  });
+});

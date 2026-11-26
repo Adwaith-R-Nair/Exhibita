@@ -117,6 +117,29 @@ const MIGRATIONS: ReadonlyArray<readonly [name: string, ddl: string]> = [
        loss_reason VARCHAR(255) NULL
      )`,
   ],
+  // Review round 1: payer identity for Compelling Evidence 3.0, the processor's refunded amount for
+  // reconciliation, and the app's own dispute ledger (atomic intake claim, trusted disputed orders).
+  [
+    'v009_orders_payer_identity',
+    `ALTER TABLE orders
+       ADD COLUMN card_fingerprint VARCHAR(64) NULL,
+       ADD COLUMN card_network VARCHAR(16) NOT NULL DEFAULT 'unknown',
+       ADD COLUMN account_id VARCHAR(64) NULL,
+       ADD COLUMN ship_address_hash VARCHAR(64) NULL,
+       ADD COLUMN fraud_reported TINYINT NOT NULL DEFAULT 0`,
+  ],
+  ['v010_charges_amount_refunded', 'ALTER TABLE charges ADD COLUMN amount_refunded BIGINT NOT NULL DEFAULT 0'],
+  [
+    'v011_create_disputes',
+    `CREATE TABLE IF NOT EXISTS disputes (
+       external_id VARCHAR(64) PRIMARY KEY,
+       order_id VARCHAR(32) NULL,
+       customer_id VARCHAR(32) NULL,
+       issue_key VARCHAR(32) NULL,
+       received_at DATETIME(3) NOT NULL,
+       INDEX idx_disputes_customer (customer_id)
+     )`,
+  ],
 ];
 
 export async function runMigrations(): Promise<string[]> {
