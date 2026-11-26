@@ -67,6 +67,19 @@ This is the engineering log for Exhibita, a Forge app for Jira Service Managemen
 
 ---
 
+## Housekeeping and a clean rebuild (27 Nov 2026)
+
+### Done
+- **Repository history tidied.** With the owner's approval, two commit messages were reworded and the working-notes file was renamed to `AGENTS.md` in every commit, then the history was force-pushed. Code, authors and dates are unchanged; every commit hash after the second commit changed, and the hashes cited in this log were remapped to match.
+- **Clean project keys again.** Projects in the Jira trash keep their keys, so the demo had been running on SUP2, INC2 and DEP2. The three old demo projects (synthetic data only) were permanently deleted from the trash with the owner's approval; the demo was then removed and set up again.
+
+### Verified live
+- The new ledger-based removal ran for the first time on a ledger-era demo: "Removed SUP2, INC2, DEP2, space EXHPOL and the demo records".
+- A fresh setup created SUP, INC and DEP again. INC-1 now reads "is caused by DEP-1" and "causes SUP-5", confirming the link-direction fix (row 26).
+- 63 of 63 demo disputes reach their intended recommendation. The hero is DSP-155.
+
+---
+
 ## Review round 1 fixes (27 Nov 2026)
 
 ### Built
