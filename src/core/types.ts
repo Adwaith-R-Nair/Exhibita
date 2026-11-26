@@ -52,6 +52,20 @@ export interface EvidenceItem {
   /** When the underlying fact was recorded (ISO 8601). */
   at: string;
   note?: string;
+  /** Type-specific details the challenge rules read, for example a policy's effective dates. */
+  meta?: EvidenceMeta;
+}
+
+export interface EvidenceMeta {
+  /** Policy versions: when this version took effect and stopped applying (ISO 8601, null = still in force). */
+  effectiveFrom?: string;
+  effectiveTo?: string | null;
+  version?: string;
+  /** Incidents: the window during which the incident affected customers. */
+  windowStart?: string;
+  windowEnd?: string | null;
+  /** Customer messages: the exact phrase a classifier label came from. */
+  quote?: string;
 }
 
 export type ReasonKey = 'visa-13.1' | 'visa-13.3' | 'visa-12.6.1' | 'visa-10.4' | 'visa-13.2';
