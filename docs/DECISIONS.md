@@ -63,3 +63,21 @@ Each decision has an ID that commit subjects reference, for example `(D-04)`. A 
 **Context:** Spike S8 showed that anyone who can edit a work item can rewrite its issue properties through the REST API. Evidence typed into the property by hand passed the submit gate.
 **Decision:** The record is stored in Forge app storage under `record:{issueId}`, which only the app can write, and mirrored to the issue property `exhibita` for JQL and display. The panel, the validator and the agent actions read the stored copy only. If the mirror differs from it, the panel and agent say so. If only a mirror exists, nothing is evaluated and submission is blocked. A redelivered webhook restores a missing stored record from the authenticated payload, with evidence collected again.
 **Consequence:** Evidence can only enter a record through Exhibita's own code paths. Each read costs one extra storage call, and records are keyed by issue id so they survive a project move.
+
+## D-12: Submission follows the final verdict, after the challenge
+**Date:** 26 Nov 2026
+**Context:** The rubric can say Fight with every required item met while the challenge finds something that makes fighting unsafe, such as the customer saying the parcel never arrived. Gating on the rubric alone would let that case through.
+**Decision:** The panel, the validator and the agent actions share one verdict: the rubric's result, then the challenge. "Submit to network" needs every required item met and a final recommendation of Fight. When the challenge changes the recommendation, the panel says so and shows the case against.
+**Consequence:** The challenge can block a submission, never unblock one. The checklist still explains what is missing.
+
+## D-13: The setup wizard is driven step by step from the admin's browser
+**Date:** 26 Nov 2026
+**Context:** Creating projects, workflows and Confluence spaces must run as the admin, takes minutes in total, and each resolver call has a short time limit. Queue consumers do not run as the user.
+**Decision:** "Set up demo data" runs as a list of find-or-create steps. The page calls one bounded step at a time and shows progress. State, including everything created, is saved in app storage after every step, so a failed run resumes where it stopped and "Remove demo data" removes exactly what was made. Disputes are pushed through the same queue the webhook uses, so the demo exercises the real intake path.
+**Consequence:** The admin keeps the page open for a few minutes. Nothing half-made is left untracked.
+
+## D-14: Demo world layout
+**Date:** 26 Nov 2026
+**Context:** Jira assigns issue keys, so the story cannot rely on keys such as INC-231. Service projects made through the REST API need the right template (spike S3, revisited).
+**Decision:** Disputes in a service project (default DSP), support tickets in a second service project (SUP), incidents and deploys in two company-managed software projects (INC, DEP), policies in a Confluence space (EXHPOL), and payment records in Forge SQL. Ticket and incident details that Jira cannot hold natively (original message times, incident windows) are stored as issue properties, and policy effective dates as a page property, because Jira and Confluence timestamps cannot be backdated.
+**Consequence:** The story's keys depend on the site, for example "INC-1 caused by DEP-2". Causes are recorded only as Jira "Causes" links and SQL impact rows.
