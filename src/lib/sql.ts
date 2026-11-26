@@ -140,6 +140,23 @@ const MIGRATIONS: ReadonlyArray<readonly [name: string, ddl: string]> = [
        INDEX idx_disputes_customer (customer_id)
      )`,
   ],
+  // M3: refunds queued for customers an incident affected who have not disputed. Exhibita never moves
+  // money; the payments team works this queue.
+  [
+    'v012_create_refund_queue',
+    `CREATE TABLE IF NOT EXISTS refund_queue (
+       incident_key VARCHAR(32) NOT NULL,
+       order_id VARCHAR(32) NOT NULL,
+       customer_id VARCHAR(32) NOT NULL,
+       amount BIGINT NOT NULL,
+       currency CHAR(3) NOT NULL,
+       status VARCHAR(16) NOT NULL,
+       queued_at DATETIME(3) NOT NULL,
+       queued_by VARCHAR(128) NOT NULL,
+       tracking_key VARCHAR(32) NULL,
+       PRIMARY KEY (incident_key, order_id)
+     )`,
+  ],
 ];
 
 export async function runMigrations(): Promise<string[]> {

@@ -205,6 +205,7 @@ export async function deleteDemoRows(ids: DemoRowIds): Promise<void> {
   await deleteWhereIn('customers', 'id', ids.customers);
   await deleteWhereIn('outcomes', 'dispute_id', ids.outcomes);
   await deleteWhereIn('disputes', 'external_id', ids.disputes);
+  await deleteWhereIn('refund_queue', 'order_id', ids.orders);
 }
 
 /** Work items intake created for these dispute ids, from the app's own ledger. */
@@ -232,4 +233,69 @@ export async function clearLegacyDemoTables(): Promise<void> {
   for (const table of ['incident_impacts', 'refunds', 'charges', 'orders', 'products', 'customers', 'outcomes']) {
     await sql.prepare(`DELETE FROM ${table}`).execute();
   }
+}
+
+/** Every dispute intake has recorded against a work item. */
+export async function allLedgerIssues(): Promise<{ externalId: string; issueKey: string; orderId: string | null; customerId: string | null }[]> {
+  const rows = await query("SELECT external_id, issue_key, order_id, customer_id FROM disputes WHERE issue_key IS NOT NULL AND issue_key NOT LIKE 'pending:%'");
+  return rows.map((r) => ({
+    externalId: String(r.external_id),
+    issueKey: String(r.issue_key),
+    orderId: r.order_id == null ? null : String(r.order_id),
+    customerId: r.customer_id == null ? null : String(r.customer_id),
+  }));
+}
+
+/**
+ * Orders an incident affected whose refund is still owed: the impact record names the refund, the refund
+ * was not cancelled, and the processor has not refunded the charge (its view, not the refund service's).
+ */
+export async function affectedOrdersFor(incidentKey: string): Promise<{ orderId: string; customer: string; amount: number; currency: string; refundId: string }[]> {
+  const rows = await query(
+    `SELECT r.id AS refund_id, r.order_id, o.customer_id, r.amount, r.currency
+     FROM incident_impacts i
+     JOIN refunds r ON r.id = i.refund_id
+     JOIN orders o ON o.id = r.order_id
+     JOIN charges c ON c.id = r.charge_id
+     WHERE i.incident_key = ? AND r.status <> 'voided' AND r.status <> 'declined' AND c.amount_refunded < r.amount
+     ORDER BY r.order_id`,
+    incidentKey,
+  );
+  return rows.map((r) => ({ orderId: String(r.order_id), customer: String(r.customer_id), amount: Number(r.amount), currency: String(r.currency), refundId: String(r.refund_id) }));
+}
+
+/**
+ * Cancel stuck refunds settled by an accepted chargeback, so a replay of the refund worker cannot pay the
+ * customer twice (D-17). Only refunds still owed change; a refund that already settled is left alone.
+ */
+export async function voidRefunds(refundIds: readonly string[], reason: string): Promise<void> {
+  for (let i = 0; i < refundIds.length; i += ID_BATCH) {
+    const batch = refundIds.slice(i, i + ID_BATCH);
+    if (batch.length === 0) continue;
+    await sql
+      .prepare(`UPDATE refunds SET status = 'voided', decline_reason = ? WHERE id IN (${placeholders(batch.length)}) AND status IN ('requested', 'approved', 'initiated', 'completed')`)
+      .bindParams(reason, ...batch)
+      .execute();
+  }
+}
+
+export async function queueProactiveRefunds(
+  incidentKey: string,
+  orders: readonly { orderId: string; customer: string; amount: number; currency: string }[],
+  queuedBy: string,
+  trackingKey: string | null,
+): Promise<void> {
+  const now = toSqlTime(new Date().toISOString());
+  for (let i = 0; i < orders.length; i += INSERT_BATCH) {
+    const batch = orders.slice(i, i + INSERT_BATCH);
+    await sql
+      .prepare(`INSERT IGNORE INTO refund_queue (incident_key, order_id, customer_id, amount, currency, status, queued_at, queued_by, tracking_key) VALUES ${batch.map(() => "(?, ?, ?, ?, ?, 'queued', ?, ?, ?)").join(', ')}`)
+      .bindParams(...batch.flatMap((o) => [incidentKey, o.orderId, o.customer, o.amount, o.currency, now, queuedBy, trackingKey]))
+      .execute();
+  }
+}
+
+export async function queuedRefundCount(incidentKey: string): Promise<number> {
+  const [row] = await query('SELECT COUNT(*) AS n FROM refund_queue WHERE incident_key = ?', incidentKey);
+  return Number(row?.n ?? 0);
 }

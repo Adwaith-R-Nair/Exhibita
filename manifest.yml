@@ -18,6 +18,16 @@ modules:
       render: native
       title: Exhibita setup
 
+  # The Exhibita page: incidents behind disputes, blast radius and confirmed cluster actions (M3).
+  jira:globalPage:
+    - key: exhibita-page
+      resource: systemic
+      resolver:
+        function: systemic-fn
+      render: native
+      title: Exhibita
+      icon: resource:icons;exhibit.svg
+
   jira:workflowValidator:
     - key: exhibita-submit-validator
       name: Exhibita evidence complete
@@ -126,6 +136,8 @@ modules:
       handler: index.panelHandler
     - key: admin-fn
       handler: index.adminHandler
+    - key: systemic-fn
+      handler: index.systemicHandler
     - key: validator-fn
       handler: index.validateSubmit
     - key: intake-fn
@@ -145,6 +157,8 @@ resources:
     path: src/frontend/panel.tsx
   - key: admin
     path: src/frontend/admin.tsx
+  - key: systemic
+    path: src/frontend/systemic.tsx
   - key: icons
     path: static/icons
   - key: agent-prompts

@@ -42,6 +42,8 @@ type PanelState =
       evaluation: Evaluation;
       findings: Finding[];
       verdict: Verdict;
+      linkedIncident: string | null;
+      pageUrl: string | null;
     };
 
 const VERDICT = {
@@ -267,6 +269,15 @@ function App() {
         <SectionMessage appearance="warning" title="Submit to network is blocked">
           <Text>
             {evaluation.blockers.length > 0 ? `Add: ${evaluation.blockers.join('; ')}` : `Resolve first: ${against.map((f) => f.title).join('; ') || verdict.why}`}
+          </Text>
+        </SectionMessage>
+      )}
+
+      {data.linkedIncident && (
+        <SectionMessage appearance="information" title={`Linked to ${data.linkedIncident}`}>
+          <Text>
+            An explicit link names {data.linkedIncident} as the cause.{' '}
+            {data.pageUrl ? <Link href={data.pageUrl}>See every dispute and customer it affected</Link> : 'See the Exhibita page under Apps.'}
           </Text>
         </SectionMessage>
       )}

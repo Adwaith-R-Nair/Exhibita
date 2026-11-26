@@ -18,3 +18,14 @@ export async function userCanBrowse(issueKey: string): Promise<boolean> {
   const res = await api.asUser().requestJira(route`/rest/api/3/issue/${issueKey}?fields=summary`, { headers: { Accept: 'application/json' } });
   return res.ok;
 }
+
+/** The caller must hold these project permissions (for example BROWSE_PROJECTS, TRANSITION_ISSUES). */
+export async function requireProjectPermissions(projectKey: string, permissions: readonly string[], what: string): Promise<void> {
+  const res = await api.asUser().requestJira(route`/rest/api/3/mypermissions?projectKey=${projectKey}&permissions=${permissions.join(',')}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) throw new NotAllowedError(`Could not check your permissions on ${projectKey} (HTTP ${res.status}).`);
+  const body = (await res.json()) as { permissions?: Record<string, { havePermission?: boolean }> };
+  const missing = permissions.filter((p) => !body.permissions?.[p]?.havePermission);
+  if (missing.length > 0) throw new NotAllowedError(`You need permission to ${what} in ${projectKey}.`);
+}
