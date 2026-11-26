@@ -131,4 +131,89 @@ describe('challengeDispute', () => {
     ]);
     expect(r.findings.map((f) => f.severity)).toEqual(['decisive', 'weakens', 'note']);
   });
+
+  it('falls back to the purchase date on the policy when the webhook had none (review B11)', () => {
+    const v2 = ev('policy', 'accepted-at-checkout', 'CONF-12', {
+      meta: { version: 'v2', effectiveFrom: '2026-10-15T00:00:00Z', effectiveTo: null, purchasedAt: '2026-10-01T12:00:00Z' },
+    });
+    const r = run(dispute('visa-13.1', { purchasedAt: null }), [...strong131(), v2]);
+    const f = r.findings.find((x) => x.rule === 'policy-not-in-force');
+    expect(f?.severity).toBe('weakens');
+    expect(f?.detail).toMatch(/2026-10-01/);
+  });
+
+  it('treats a partial amount still owed as weakening, not decisive (review B6)', () => {
+    const r = run(dispute('visa-13.3'), [ev('refund', 'partial-approved-not-completed', 'refunds/REF-3', { meta: { refundId: 'REF-3', amount: 2000 } })]);
+    const f = r.findings.find((x) => x.rule === 'refund-outstanding');
+    expect(f?.severity).toBe('weakens');
+    expect(r.recommendation).toBe('investigate');
+  });
+
+  it('does not note a repaired incident as an unlinked overlap', () => {
+    const r = run(dispute('visa-13.1'), [
+      ...strong131(),
+      ev('incident', 'dropped-refund-repaired', 'INC-1', { meta: { windowStart: '2026-09-30T00:00:00Z', windowEnd: null } }),
+    ]);
+    expect(r.findings).toEqual([]);
+  });
+
+  it('never predicts the outcome (D-08)', () => {
+    const r = run(dispute('visa-13.3'), [ev('refund', 'approved-not-completed', 'REF-1')]);
+    expect(JSON.stringify(r)).not.toMatch(/likely|will side|will lose|win/i);
+  });
+});
+
+describe('reconciliation: the refund never reached the card (review D1)', () => {
+  const credit = dispute('visa-13.6', { amount: minor(24900) });
+  const refundSent = ev('refund', 'completed-before-dispute', 'refunds/REF-1001', {
+    at: '2026-10-25T00:00:00Z',
+    meta: { refundId: 'REF-1001', amount: 24900, linkedIncident: 'INC-1', linkedDeploy: 'DEP-1' },
+  });
+  const notSettled = (cents = 24900, meta: EvidenceMeta = { linkedIncident: 'INC-1', linkedDeploy: 'DEP-1' }) =>
+    ev('processor-refund', 'not-settled', 'charges/ch_1', { at: '2026-11-20T00:00:00Z', meta: { refundId: 'REF-1001', amount: cents, chargeId: 'ch_1', ...meta } });
+  const incident = ev('incident', 'caused-dropped-refund', 'INC-1', {
+    meta: { windowStart: '2026-10-20T00:00:00Z', windowEnd: '2026-10-27T00:00:00Z', linkedDeploy: 'DEP-1' },
+  });
+  incident.source.title = 'Refund worker marked refunds as sent without sending them';
+
+  it('flips a checklist Fight to Accept, naming the refund, the charge, the incident and the deploy', () => {
+    const evidence = [refundSent, notSettled(), incident];
+    const evaluation = evaluateDispute(credit, evidence);
+    expect(evaluation.recommendation).toBe('fight');
+    expect(evaluation.coverage.label).toBe('Strong');
+    const r = challengeDispute(credit, evidence, evaluation);
+    const f = r.findings.find((x) => x.rule === 'refund-not-settled')!;
+    expect(f.severity).toBe('decisive');
+    expect(f.detail).toMatch(/^The refund service marked REF-1001 as sent, but the processor shows no refund on the charge ch_1\./);
+    expect(f.detail).toMatch(/INC-1 \(Refund worker marked refunds as sent without sending them\)/);
+    expect(f.detail).toMatch(/DEP-1/);
+    expect(r.recommendation).toBe('accept');
+    expect(r.changed).toBe(true);
+    expect(r.why).toMatch(/REF-1001/);
+  });
+
+  it('makes no causal claim when the refund has no explicit incident link', () => {
+    const r = run(credit, [refundSent, notSettled(24900, {})]);
+    const f = r.findings.find((x) => x.rule === 'refund-not-settled')!;
+    expect(f.detail).not.toMatch(/INC-|DEP-/);
+    expect(r.recommendation).toBe('accept');
+  });
+
+  it('only weakens the case when the unsettled refund is less than the disputed amount', () => {
+    const r = run(credit, [refundSent, notSettled(5000, {})]);
+    expect(r.findings.find((x) => x.rule === 'refund-not-settled')?.severity).toBe('weakens');
+    expect(r.recommendation).toBe('investigate');
+  });
+
+  it('says nothing when the processor settled the refund', () => {
+    const settled = ev('processor-refund', 'settled', 'charges/ch_1', { meta: { refundId: 'REF-1001', amount: 24900, chargeId: 'ch_1' } });
+    const r = run(credit, [refundSent, settled]);
+    expect(r.findings.map((x) => x.rule)).not.toContain('refund-not-settled');
+    expect(r.recommendation).toBe('fight');
+  });
+
+  it('raises a customer who says the refund never arrived on a credit-not-processed dispute', () => {
+    const r = run(credit, [refundSent, ev('customer-message', 'refund-not-received', 'SUP-1', { kind: 'inference', meta: { quote: 'refund still has not arrived' } })]);
+    expect(r.findings.find((x) => x.rule === 'customer-contradicts')?.severity).toBe('weakens');
+  });
 });

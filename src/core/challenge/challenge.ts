@@ -5,6 +5,7 @@ import { describeState } from '../rubric/states';
 import type { Dispute, Evaluation, EvidenceItem, Recommendation } from '../types';
 
 export type ChallengeRule =
+  | 'refund-not-settled'
   | 'refund-outstanding'
   | 'incident-linked'
   | 'customer-contradicts'
@@ -52,7 +53,8 @@ const CONTRADICTING_MESSAGES: Record<string, readonly string[]> = {
   'visa-13.3': ['complained', 'requested-refund'],
   'visa-12.6.1': [],
   'visa-10.4': [],
-  'visa-13.2': ['requested-refund'],
+  'visa-13.2': ['requested-refund', 'cancelled'],
+  'visa-13.6': ['refund-not-received'],
   default: ['denied-receipt', 'complained', 'requested-refund'],
 };
 
@@ -66,20 +68,67 @@ const keys = (items: readonly EvidenceItem[]) => items.map((e) => e.source.key).
 
 type Rule = (d: Dispute, evidence: readonly EvidenceItem[], evaluation: Evaluation) => Finding[];
 
+const OUTSTANDING: Record<string, { severity: Severity; title: string; detail: string }> = {
+  'approved-not-completed': {
+    severity: 'decisive',
+    title: 'A refund was approved but never paid',
+    detail: 'The customer was promised their money and never got it, so they are right to dispute.',
+  },
+  'partial-approved-not-completed': {
+    severity: 'weakens',
+    title: 'Part of the amount is still owed as a refund',
+    detail: 'The customer is owed part of what they disputed. A person should decide whether to refund that part and fight the rest.',
+  },
+  initiated: {
+    severity: 'weakens',
+    title: 'A refund is in progress',
+    detail: 'If it completes, fighting would risk refunding twice.',
+  },
+};
+
 const refundOutstanding: Rule = (_d, evidence) =>
   evidence
-    .filter((e) => e.type === 'refund' && (e.state === 'approved-not-completed' || e.state === 'initiated'))
-    .map((e) => ({
-      rule: 'refund-outstanding',
-      severity: e.state === 'approved-not-completed' ? 'decisive' : 'weakens',
-      title: e.state === 'approved-not-completed' ? 'A refund was approved but never paid' : 'A refund is in progress',
-      detail: `Refund ${describeState(e.state)} (${e.source.key}). ${
-        e.state === 'approved-not-completed'
-          ? 'The customer was promised their money and never got it, so the bank will side with them.'
-          : 'If it completes, fighting would risk refunding twice.'
-      }`,
-      evidence: [e],
-    }));
+    .filter((e) => e.type === 'refund' && OUTSTANDING[e.state])
+    .map((e) => {
+      const o = OUTSTANDING[e.state]!;
+      return {
+        rule: 'refund-outstanding',
+        severity: o.severity,
+        title: o.title,
+        detail: `Refund ${describeState(e.state)} (${e.source.key}). ${o.detail}`,
+        evidence: [e],
+      };
+    });
+
+/**
+ * Reconciliation (review D1): the refund service says a refund was sent, but the processor shows no such
+ * refund on the charge. Decisive when the missing money covers the disputed amount; otherwise it only
+ * weakens the case. Names the incident and deploy only when they are explicitly linked to the refund.
+ */
+const refundNotSettled: Rule = (d, evidence) =>
+  evidence
+    .filter((e) => e.type === 'processor-refund' && e.state === 'not-settled')
+    .map((e) => {
+      const refundId = e.meta?.refundId ?? 'the refund';
+      const chargeId = e.meta?.chargeId ?? e.source.key;
+      const full = (e.meta?.amount ?? 0) >= d.amount;
+      const incidentKey = e.meta?.linkedIncident;
+      const incident = incidentKey ? evidence.find((x) => x.type === 'incident' && x.source.key === incidentKey) : undefined;
+      const cause = incidentKey
+        ? ` ${incidentKey}${incident?.source.title ? ` (${incident.source.title})` : ''} is explicitly linked to this refund${
+            e.meta?.linkedDeploy ? `, and was caused by ${e.meta.linkedDeploy}` : ''
+          }.`
+        : '';
+      return {
+        rule: 'refund-not-settled' as const,
+        severity: full ? ('decisive' as const) : ('weakens' as const),
+        title: 'The refund never reached the card',
+        detail: `The refund service marked ${refundId} as sent, but the processor shows no refund on the charge ${chargeId}.${cause}${
+          full ? ' The customer never got their money back.' : ' The missing refund is less than the disputed amount, so a person should decide.'
+        }`,
+        evidence: [e, ...(incident ? [incident] : [])],
+      };
+    });
 
 const incidentLinked: Rule = (_d, evidence) =>
   evidence
@@ -151,8 +200,10 @@ const evidenceAfterDispute: Rule = (d, _evidence, evaluation) => {
 
 const policyNotInForce: Rule = (d, evidence) => {
   const policies = evidence.filter((e) => e.type === 'policy');
-  const purchased = ms(d.purchasedAt);
   if (policies.length === 0) return [];
+  // The webhook's purchase date, or the order's, carried on the policy evidence (review B11).
+  const purchasedIso = d.purchasedAt ?? policies.find((e) => e.meta?.purchasedAt)?.meta?.purchasedAt ?? null;
+  const purchased = ms(purchasedIso);
   if (purchased === null) {
     return [
       {
@@ -176,7 +227,7 @@ const policyNotInForce: Rule = (d, evidence) => {
       title: 'The cited policy was not in force at purchase',
       detail: `${e.source.key}${e.meta?.version ? ` (${e.meta.version})` : ''} applied from ${day(e.meta?.effectiveFrom ?? '')}${
         e.meta?.effectiveTo ? ` to ${day(e.meta.effectiveTo)}` : ''
-      }, but the customer paid on ${day(d.purchasedAt!)}. Only the version in force on the purchase date counts.`,
+      }, but the customer paid on ${day(purchasedIso!)}. Only the version in force on the purchase date counts.`,
       evidence: [e],
     }));
 };
@@ -186,7 +237,7 @@ const incidentOverlapUnlinked: Rule = (d, evidence) => {
   const to = ms(d.receivedAt);
   if (from === null || to === null) return [];
   return evidence
-    .filter((e) => e.type === 'incident' && !e.state.startsWith('caused-') && e.meta?.windowStart)
+    .filter((e) => e.type === 'incident' && e.state === 'unrelated' && e.meta?.windowStart)
     .filter((e) => {
       const start = ms(e.meta!.windowStart)!;
       const end = ms(e.meta!.windowEnd ?? null) ?? Number.POSITIVE_INFINITY;
@@ -202,6 +253,7 @@ const incidentOverlapUnlinked: Rule = (d, evidence) => {
 };
 
 const RULES: readonly Rule[] = [
+  refundNotSettled,
   refundOutstanding,
   incidentLinked,
   customerContradicts,

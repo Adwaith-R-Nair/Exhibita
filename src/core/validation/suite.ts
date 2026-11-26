@@ -151,6 +151,7 @@ export const VALIDATION_CASES: readonly ValidationCase[] = [
       const { ev } = fixtures();
       const cases: DisputeCase[] = Array.from({ length: 5 }, (_, i) => ({
         issueKey: `DSP-${i + 1}`,
+        orderId: `ORD-${i + 1}`,
         customer: `cus_${i}`,
         amount: minor(4900),
         currency: 'USD',
@@ -172,8 +173,8 @@ export const VALIDATION_CASES: readonly ValidationCase[] = [
       const unrelated = ev('incident', 'unrelated', 'INC-300', { meta: { windowStart: '2026-09-30T00:00:00Z', windowEnd: '2026-10-03T00:00:00Z' } });
       const { challenge } = full(dispute('visa-12.6.1', 49), [ev('order-pair', 'distinct', 'ORD-VAL'), unrelated]);
       const clusters = clusterDisputes([
-        { issueKey: 'DSP-1', customer: 'a', amount: minor(100), currency: 'USD', evidence: [unrelated] },
-        { issueKey: 'DSP-2', customer: 'b', amount: minor(100), currency: 'USD', evidence: [unrelated] },
+        { issueKey: 'DSP-1', orderId: 'ORD-1', customer: 'a', amount: minor(100), currency: 'USD', evidence: [unrelated] },
+        { issueKey: 'DSP-2', orderId: 'ORD-2', customer: 'b', amount: minor(100), currency: 'USD', evidence: [unrelated] },
       ]);
       const note = challenge.findings.find((f) => f.rule === 'incident-overlap-unlinked');
       return {

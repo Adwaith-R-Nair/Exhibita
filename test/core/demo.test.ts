@@ -54,7 +54,7 @@ describe('generateWorld: determinism', () => {
 
 describe('generateWorld: volumes', () => {
   it('keeps Jira and Confluence volume modest', () => {
-    expect(world.disputes).toHaveLength(60);
+    expect(world.disputes).toHaveLength(STORY.disputes);
     expect(world.tickets.length).toBeGreaterThanOrEqual(25);
     expect(world.tickets.length).toBeLessThanOrEqual(35);
     expect(world.incidents).toHaveLength(3);
@@ -67,12 +67,35 @@ describe('generateWorld: volumes', () => {
 describe('generateWorld: disputes', () => {
   const disputes = disputed(world);
 
-  it('has exactly one hero: $249.00, not as described, expected accept', () => {
+  it('has exactly one hero: $249.00 on a Visa card, credit not processed, expected accept', () => {
     const heroes = world.disputes.filter((d) => d.hero);
     expect(heroes).toHaveLength(1);
     const hero = disputes[world.disputes.indexOf(heroes[0]!)]!;
-    expect(hero).toMatchObject({ amount: 24_900, currency: 'USD', reasonCode: 'visa-13.3', processorReason: 'product_unacceptable' });
+    expect(hero).toMatchObject({
+      amount: 24_900,
+      currency: 'USD',
+      reasonCode: 'visa-13.6',
+      processorReason: 'credit_not_processed',
+      network: 'visa',
+      networkReasonCode: '13.6',
+    });
     expect(heroes[0]!.expected).toBe('accept');
+  });
+
+  it('puts the card brand and network reason code on every payload, with one Mastercard dispute', () => {
+    for (const d of disputes) {
+      const order = world.orders.find((o) => o.id === d.orderId)!;
+      expect(d.network).toBe(order.cardNetwork);
+      expect(d.networkReasonCode).toBeTruthy();
+    }
+    expect(disputes.filter((d) => d.network === 'mastercard')).toHaveLength(1);
+  });
+
+  it('keeps the queue mixed: the cluster accepts, and the other scenarios mostly fight or investigate', () => {
+    const count = (r: string) => world.disputes.filter((d) => d.expected === r).length;
+    expect(count('accept')).toBe(STORY.clusterSize + 2);
+    expect(count('fight')).toBeGreaterThanOrEqual(12);
+    expect(count('investigate')).toBeGreaterThanOrEqual(11);
   });
 
   it('sends Stripe-compatible payloads that normalise cleanly', () => {
@@ -111,7 +134,9 @@ describe('generateWorld: disputes', () => {
   });
 
   it('covers every reason and every recommendation', () => {
-    expect(new Set(world.disputes.map((d) => d.reasonCode))).toEqual(new Set(['visa-13.1', 'visa-13.3', 'visa-12.6.1', 'visa-10.4', 'visa-13.2']));
+    expect(new Set(world.disputes.map((d) => d.reasonCode))).toEqual(
+      new Set(['visa-13.1', 'visa-13.3', 'visa-12.6.1', 'visa-10.4', 'visa-13.2', 'visa-13.6']),
+    );
     expect(new Set(world.disputes.map((d) => d.expected))).toEqual(new Set(['fight', 'accept', 'investigate']));
   });
 });
@@ -122,14 +147,26 @@ describe('generateWorld: the incident story', () => {
   const incident = world.incidents.find((i) => i.ref === DEMO_REFS.refundIncident)!;
   const disputedOrders = new Set(disputed(world).map((d) => d.orderId));
 
-  it('drops approved refunds during the incident window, caused by the refund-worker deploy', () => {
+  it('marks refunds as sent during the incident window without sending them, caused by the refund-worker deploy', () => {
     expect(incident.effect).toBe('dropped-refunds');
+    expect(incident.title).toBe('Refund worker marked refunds as sent without sending them');
     expect(incident.causedByDeployRef).toBe(DEMO_REFS.refundDeploy);
     expect(refunds).toHaveLength(STORY.clusterSize + STORY.notYetDisputed);
     for (const r of refunds) {
-      expect(r).toMatchObject({ status: 'approved', completedAt: null });
-      expect(Date.parse(r.approvedAt!)).toBeGreaterThanOrEqual(Date.parse(incident.windowStart));
-      expect(Date.parse(r.approvedAt!)).toBeLessThanOrEqual(Date.parse(incident.windowEnd!));
+      // The refund service says completed...
+      expect(r.status).toBe('completed');
+      expect(Date.parse(r.completedAt!)).toBeGreaterThanOrEqual(Date.parse(incident.windowStart));
+      expect(Date.parse(r.completedAt!)).toBeLessThanOrEqual(Date.parse(incident.windowEnd!));
+      // ...but the processor never refunded the charge.
+      const charge = world.charges.find((c) => c.id === r.chargeId)!;
+      expect(charge).toMatchObject({ amountRefunded: 0, refundedAt: null });
+    }
+  });
+
+  it('gives every completed refund outside the incident a matching processor refund', () => {
+    const incidentRefunds = new Set(refunds.map((r) => r.id));
+    for (const r of world.refunds.filter((x) => x.status === 'completed' && !incidentRefunds.has(x.id))) {
+      expect(world.charges.find((c) => c.id === r.chargeId)!.amountRefunded).toBeGreaterThanOrEqual(r.amount);
     }
   });
 
@@ -162,6 +199,15 @@ describe('generateWorld: records', () => {
     for (const row of [...world.orders, ...world.charges, ...world.refunds, ...world.outcomes]) {
       expect(Number.isInteger(row.amount)).toBe(true);
       expect(row.currency).toBe('USD');
+    }
+  });
+
+  it('records who paid: card, network, account and shipping address on every order', () => {
+    for (const o of world.orders) {
+      expect(o.cardFingerprint).toMatch(/^card_/);
+      expect(['visa', 'mastercard']).toContain(o.cardNetwork);
+      expect(o.accountId).toMatch(/^acct_/);
+      expect(o.fraudReported).toBe(false);
     }
   });
 

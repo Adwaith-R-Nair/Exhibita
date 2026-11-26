@@ -76,23 +76,20 @@ const msg = (text: string, ...labels: MessageLabel[]): MessageTemplate => ({ tex
 
 /** Customer messages. The labels are what classifyMessage returns, not what a reader might expect. */
 export const MESSAGES = {
-  // The hero: looks like a happy customer, then asks for a refund that never arrives.
+  // The hero: a happy customer who returned the jacket. The refund service told them it was sent.
   heroAck: msg('Got it, thanks! The jacket arrived this morning.', 'acknowledged-receipt'),
   heroRefund: msg(
     'The jacket is not what I ordered, the lining is completely different from the photos. I would like to return it and get a refund.',
     'complained',
     'requested-refund',
   ),
-  heroChase: msg(
-    'My refund was approved weeks ago and it is still not on my statement. If it does not show up soon I will have to call my bank.',
-    'mentioned-bank',
-  ),
-  // Customers whose approved refunds were dropped.
-  chaseApproved: msg('Your team approved my refund, but the money is not on my card yet.'),
-  chaseWhere: msg('I was told my refund was approved. Can you check where it is?'),
-  chasePlease: msg('Refund please, it was approved two weeks ago and nothing has happened since.', 'requested-refund'),
-  chaseAccount: msg('Hello, checking on the refund you approved for my order. It has not reached my account.'),
-  watcherBank: msg('Still no sign of my refund. I will dispute the charge with my bank if this drags on.', 'mentioned-bank'),
+  // Customers whose refunds were marked as sent but never reached their card.
+  chaseSent: msg('Your email said my refund was sent, but the money is not on my card yet.'),
+  chaseWhere: msg('I was told my refund was sent. Can you check where it is?'),
+  chasePlease: msg('Refund please, you said it was sent two weeks ago and nothing has reached my card.', 'requested-refund'),
+  chaseAccount: msg('Hello, checking on the refund you sent for my order. It has not reached my account.'),
+  chaseArrived: msg("My refund still hasn't arrived and it has been three weeks.", 'refund-not-received'),
+  watcherBank: msg('Still no sign of my refund. I will dispute the charge with my bank if this drags on.', 'mentioned-bank', 'refund-not-received'),
   watcherChargeback: msg('Three weeks and no refund. Next step is a chargeback.', 'mentioned-bank'),
   // Other disputes.
   arrivedThanks: msg('Package arrived today, thank you.', 'acknowledged-receipt'),
@@ -104,7 +101,7 @@ export const MESSAGES = {
   ),
   wrongAddress: msg("The tracking shows it went to an old address of mine. I haven't got anything.", 'denied-receipt'),
   stoppedWorking: msg('The blender stopped working after two days. Very disappointed.', 'complained'),
-  cancelledCharged: msg('I cancelled my subscription last month and you still charged me. I want my money back.', 'requested-refund'),
+  cancelledCharged: msg('I cancelled my subscription last month and you still charged me. I want my money back.', 'cancelled', 'requested-refund'),
   twoCharges: msg('I can see two charges for the same order on my statement. Can you explain?'),
   billingAddress: msg('Hi, can you update the billing address on my account?'),
   giftWrap: msg('Do you offer gift wrapping for my next order?'),

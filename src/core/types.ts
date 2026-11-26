@@ -34,11 +34,14 @@ export type EvidenceType =
   | 'avs'
   | 'cvv'
   | 'prior-orders'
-  | 'cancellation';
+  | 'cancellation'
+  /** The processor's view of a refund: did the money actually reach the card? (reconciliation, review D1) */
+  | 'processor-refund';
 
 /**
- * Fact: read directly from a system of record.
- * Inference: derived by classification (for example, the customer-text lexicon). Shown with an Inference label.
+ * fact: read directly from a system of record. Shown as "Record" (KIND_LABEL in rubric/states.ts), because
+ * a record shows what a system says, not that it is true (review B13).
+ * inference: derived by classification (for example, the customer-text lexicon). Shown with an Inference label.
  */
 export type EvidenceKind = 'fact' | 'inference';
 
@@ -69,9 +72,28 @@ export interface EvidenceMeta {
   /** An explicit link (not a timing guess) to the incident or deploy behind this fact. */
   linkedIncident?: string;
   linkedDeploy?: string;
+  /** Refunds and processor refunds: the refund this item is about, and its amount in minor units (review B6, D1). */
+  refundId?: string;
+  amount?: number;
+  /** Processor refunds: the charge the processor's view was read from. */
+  chargeId?: string;
+  /** Policies: when the customer paid, so the policy-in-force check runs without webhook metadata (review B11). */
+  purchasedAt?: string;
+  /** Compelling Evidence 3.0: each criterion and whether it passed, so the UI can show a candidate versus a qualified case (review B8). */
+  criteria?: EvidenceCriterion[];
 }
 
-export type ReasonKey = 'visa-13.1' | 'visa-13.3' | 'visa-12.6.1' | 'visa-10.4' | 'visa-13.2';
+export interface EvidenceCriterion {
+  id: string;
+  label: string;
+  passed: boolean;
+  detail: string;
+}
+
+export type ReasonKey = 'visa-13.1' | 'visa-13.3' | 'visa-12.6.1' | 'visa-10.4' | 'visa-13.2' | 'visa-13.6';
+
+/** Card network. The rubrics are Visa rules; other networks are shown as not supported yet (review B9). */
+export type CardNetwork = 'visa' | 'mastercard' | 'amex' | 'discover' | 'unknown';
 
 export interface Dispute {
   externalId: string;
@@ -87,6 +109,10 @@ export interface Dispute {
   receivedAt: string;
   /** When the customer paid. Decides which policy version applies. */
   purchasedAt?: string | null;
+  /** Network of the disputed card, from the processor event. Missing means unknown. */
+  network?: CardNetwork;
+  /** The network's own reason code as the processor reports it (for example "13.6"), kept raw. */
+  networkReasonCode?: string | null;
 }
 
 /** Context a requirement can use to decide whether it applies. */
@@ -115,6 +141,12 @@ export interface Requirement {
    * for example a refund approved but never completed, or an incident that caused the charge.
    */
   concedes?: readonly StateMatch[];
+  /**
+   * Evidence that argues against the requirement (review B3). For customer messages, whose labels are
+   * independent facets rather than exclusive states, only the states listed here count against it.
+   * For other types, any state that neither satisfies nor concedes still counts against it.
+   */
+  opposes?: readonly StateMatch[];
   required: boolean | ((ctx: RubricContext) => boolean);
   /** Shown verbatim in the UI as "why is this required?". */
   rule: string;
@@ -130,6 +162,11 @@ export interface Reason {
   /** Depth of coverage. Stubs are evaluated but flagged as limited in the UI. */
   depth: 'deep' | 'deep-lite' | 'stub';
   requirements: readonly Requirement[];
+  /**
+   * A full credit, issued and settled at the processor before the dispute arrived, answers the dispute on
+   * its own: "Credit issued before the dispute" (review B6).
+   */
+  creditDefense?: boolean;
 }
 
 /**
@@ -177,4 +214,6 @@ export interface Evaluation {
   canSubmit: boolean;
   /** Labels of required items that are not met. */
   blockers: string[];
+  /** Plain-English caveats, for example that the card network is unknown and Visa rules were applied (review B9). */
+  notes?: string[];
 }

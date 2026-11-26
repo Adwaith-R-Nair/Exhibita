@@ -1,7 +1,26 @@
-// Plain-English phrasing for evidence states, used in one-line explanations.
+// Plain-English phrasing for evidence states and kinds, used in one-line explanations and the UI.
+
+import type { EvidenceKind } from '../types';
+
+/**
+ * What the UI calls each kind of evidence (review B13). A system record shows what a system says, which
+ * is not the same as proving a fact, so it is labelled "Record". Classified text is an "Inference".
+ */
+export const KIND_LABEL: Record<EvidenceKind, string> = { fact: 'Record', inference: 'Inference' };
 
 const PHRASES: Record<string, string> = {
   'approved-not-completed': 'approved but never completed',
+  'partial-approved-not-completed': 'approved for part of the amount but never completed',
+  'completed-date-unknown': 'completed, date unknown',
+  settled: 'settled at the processor',
+  'not-settled': 'marked as sent, but the processor shows no refund',
+  'only-charge': 'the only charge on record',
+  'possible-duplicate': 'an identical order placed minutes apart, possibly a duplicate',
+  'dropped-refund-repaired': 'linked to a dropped refund that has since been paid',
+  'ce30-candidate': 'a Compelling Evidence 3.0 candidate that does not meet every criterion',
+  'refund-not-received': 'said the refund has not arrived',
+  'acknowledged-refund': 'acknowledged the refund',
+  cancelled: 'said they cancelled',
   initiated: 'initiated but not yet completed',
   'completed-before-dispute': 'completed before the dispute',
   'declined-per-policy': 'declined under the refund policy',

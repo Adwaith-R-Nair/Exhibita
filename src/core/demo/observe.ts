@@ -13,6 +13,7 @@ import type {
   ObservedPolicyVersion,
   ObservedRefund,
   ObservedTicket,
+  OrderRow,
   PriorOrder,
 } from '../sources/types';
 import type { Dispute } from '../types';
@@ -104,6 +105,9 @@ export function observeWorld(world: DemoWorld, keys: WorldKeys): ObservedDispute
       .sort(byTimeThenId((c) => c.chargedAt, (c) => c.id));
     const orderChargeIds = new Set(charges.filter((c) => c.orderId === order.id).map((c) => c.id));
 
+    // charges also carry the processor's view of refunds (amountRefunded), which the settlements stage
+    // reconciles against the refunds rows below. Nothing else is read for it.
+    //
     // refunds: refunds rows on the order. An incident is linked to a refund by an impact row naming it,
     // or by a Jira link from the incident to a ticket about that refund. Its deploy comes from the
     // incident's "caused by" link. ticketKey: the first ticket about the refund.
@@ -130,16 +134,29 @@ export function observeWorld(world: DemoWorld, keys: WorldKeys): ObservedDispute
         };
       });
 
-    // priorOrders: the customer's orders bought before this one; disputed when a dispute names that order.
+    // priorOrders: orders bought before this one by the same customer or on the same card (Visa CE 3.0
+    // is about the card, not the account); disputed when a dispute names that order.
+    const sameCard = (o: OrderRow) => order.cardFingerprint !== null && o.cardFingerprint === order.cardFingerprint;
     const priorOrders: PriorOrder[] = world.orders
-      .filter((o) => o.customerId === order.customerId && time(o.purchasedAt) < time(order.purchasedAt))
+      .filter((o) => o.id !== order.id && (o.customerId === order.customerId || sameCard(o)) && time(o.purchasedAt) < time(order.purchasedAt))
       .sort(byTimeThenId((o) => o.purchasedAt, (o) => o.id))
-      .map((o) => ({ id: o.id, purchasedAt: o.purchasedAt, ip: o.ip, deviceId: o.deviceId, disputed: disputedOrders.has(o.id) }));
+      .map((o) => ({
+        id: o.id,
+        purchasedAt: o.purchasedAt,
+        ip: o.ip,
+        deviceId: o.deviceId,
+        disputed: disputedOrders.has(o.id),
+        cardFingerprint: o.cardFingerprint,
+        accountId: o.accountId,
+        shippingAddressHash: o.shippingAddressHash,
+        fraudReported: o.fraudReported,
+      }));
 
-    // tickets: JSM tickets from the order's customer, with the description and comments as messages.
+    // tickets: JSM tickets from the order's customer, with the description and comments as messages, and
+    // the order each one is about (its "Order" field), so the collector can drop tickets about other orders.
     const tickets: ObservedTicket[] = world.tickets
       .filter((t) => t.customerId === customerId)
-      .map((t) => ({ key: keyOf(t.ref), ...urlOf('jsm', keyOf(t.ref)), createdAt: t.createdAt, messages: t.messages }))
+      .map((t) => ({ key: keyOf(t.ref), ...urlOf('jsm', keyOf(t.ref)), orderId: t.orderId, createdAt: t.createdAt, messages: t.messages }))
       .sort(byTimeThenId((t) => t.createdAt, (t) => t.key));
 
     // incidents: explicit when an impact row names a refund or charge on this order, or a linked ticket

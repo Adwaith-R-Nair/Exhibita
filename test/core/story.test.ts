@@ -7,7 +7,9 @@ import { blastRadius, clusterDisputes, type AffectedOrder, type DisputeCase } fr
 import { collectEvidence } from '../../src/core/collect';
 import { DEMO_REFS, STORY, demoKeys, generateWorld, observeWorld } from '../../src/core/demo';
 import { evaluateDispute } from '../../src/core/rubric/evaluate';
+import { COLLECT_SOURCES, type CollectSource } from '../../src/core/sources/types';
 import { minor } from '../../src/core/types';
+import { finalVerdict } from '../../src/core/verdict';
 
 const NOW = '2026-11-26T09:00:00.000Z';
 
@@ -23,6 +25,7 @@ function runStory(seed: number) {
   const clusters = clusterDisputes(
     cases.map<DisputeCase>((c) => ({
       issueKey: c.issueKey,
+      orderId: c.dispute.orderId,
       customer: c.dispute.customer,
       amount: c.dispute.amount,
       currency: c.dispute.currency,
@@ -34,7 +37,7 @@ function runStory(seed: number) {
     .map((i) => {
       const refund = world.refunds.find((r) => r.id === i.refundId)!;
       const order = world.orders.find((o) => o.id === refund.orderId)!;
-      return { orderId: order.id, customer: order.customerId, amount: refund.amount };
+      return { orderId: order.id, customer: order.customerId, amount: refund.amount, currency: refund.currency };
     });
   return { world, keys, cases, clusters, affected };
 }
@@ -49,16 +52,35 @@ describe.each([1, 42, 20261126])('the demo story, seed %i', (seed) => {
     expect(wrong).toEqual([]);
   });
 
-  it('flips the hero to accept, citing the refund', () => {
+  it('flips the hero from a checklist Fight to Accept, citing the refund, the charge, the incident and the deploy', () => {
     const hero = cases.find((c) => c.demo.hero)!;
-    expect(hero.dispute.amount).toBe(24_900);
-    expect(hero.challenge.recommendation).toBe('accept');
-    expect(hero.challenge.why).toMatch(/refund/i);
-    expect(hero.challenge.why).toMatch(/REF-\d+/);
-    // It looks defensible on its face: delivered, as described, and the customer said they got it.
+    expect(hero.dispute).toMatchObject({ amount: 24_900, reasonCode: 'visa-13.6', network: 'visa', networkReasonCode: '13.6' });
+    // The refund service says the credit was sent before the dispute, so the checklist alone says Fight.
+    expect(hero.evaluation).toMatchObject({ recommendation: 'fight', coverage: { label: 'Strong' }, canSubmit: true });
     const states = hero.evidence.map((e) => `${e.type}:${e.state}`);
-    expect(states).toEqual(expect.arrayContaining(['delivery:delivered', 'product-description:matches-delivered', 'customer-message:acknowledged-receipt']));
-    expect(states).toContain('refund:approved-not-completed');
+    expect(states).toEqual(expect.arrayContaining(['refund:completed-before-dispute', 'processor-refund:not-settled', 'incident:caused-dropped-refund']));
+    // The processor never received it.
+    const verdict = finalVerdict(hero.evaluation, hero.challenge);
+    expect(verdict).toMatchObject({ recommendation: 'accept', changed: true, canSubmit: false });
+    const refundId = hero.evidence.find((e) => e.type === 'refund')!.meta!.refundId!;
+    expect(verdict.why).toMatch(new RegExp(`marked ${refundId} as sent, but the processor shows no refund on the charge ${hero.dispute.chargeId}`));
+    expect(verdict.why).toContain(keys.keyOf[DEMO_REFS.refundIncident]!);
+    expect(verdict.why).toContain(keys.keyOf[DEMO_REFS.refundDeploy]!);
+    expect(verdict.why).toMatch(/Refund worker marked refunds as sent without sending them/);
+  });
+
+  it('shows the hero flip source by source: Fight once refunds are read, Accept once settlements are', () => {
+    const hero = cases.find((c) => c.demo.hero)!;
+    const at = (read: number) => {
+      const pending = COLLECT_SOURCES.slice(read) as CollectSource[];
+      const evidence = collectEvidence({ ...hero.input, pending });
+      const evaluation = evaluateDispute(hero.dispute, evidence);
+      return finalVerdict(evaluation, challengeDispute(hero.dispute, evidence, evaluation)).recommendation;
+    };
+    const refundsRead = COLLECT_SOURCES.indexOf('refunds') + 1;
+    expect(at(refundsRead)).toBe('fight');
+    expect(at(refundsRead + 1)).toBe('accept');
+    expect(at(COLLECT_SOURCES.length)).toBe('accept');
   });
 
   it('clusters exactly 38 disputes under the refund incident and its deploy', () => {
@@ -74,7 +96,30 @@ describe.each([1, 42, 20261126])('the demo story, seed %i', (seed) => {
   it('finds 212 affected customers who have not disputed yet', () => {
     const radius = blastRadius(clusters[0]!, affected, { disputeFee: minor(1_500), analystMinutesPerDispute: 25 });
     expect(radius.customersNotYetDisputed).toBe(STORY.notYetDisputed);
+    expect(radius.notYetDisputed).toHaveLength(STORY.notYetDisputed);
     expect(radius.disputesSoFar).toBe(STORY.clusterSize);
+  });
+
+  it('mixes credit-not-processed and not-as-described disputes in the cluster', () => {
+    const inCluster = new Set(clusters[0]!.disputes.map((d) => d.issueKey));
+    const reasons = new Set(cases.filter((c) => inCluster.has(c.issueKey)).map((c) => c.dispute.reasonCode));
+    expect(reasons).toEqual(new Set(['visa-13.6', 'visa-13.3']));
+  });
+
+  it('answers a credit issued before the dispute, and shows a Mastercard dispute as not supported', () => {
+    const lost = cases.find((c) => /refunded in full before the dispute/.test(c.demo.scenario))!;
+    expect(lost.evaluation.why).toMatch(/^Credit issued before the dispute/);
+    const mc = cases.find((c) => c.dispute.network === 'mastercard')!;
+    expect(mc.evaluation).toMatchObject({ supported: false, recommendation: 'investigate' });
+    expect(mc.evaluation.why).toBe('Mastercard disputes are not supported yet; review by hand.');
+  });
+
+  it('has one qualified Compelling Evidence 3.0 case and one candidate that fails only on the card', () => {
+    const prior = (c: (typeof cases)[number]) => c.evidence.find((e) => e.type === 'prior-orders');
+    const states = cases.map((c) => prior(c)?.state).filter(Boolean);
+    expect(states.filter((s) => s === 'ce30-eligible')).toHaveLength(1);
+    const candidate = cases.find((c) => prior(c)?.state === 'ce30-candidate')!;
+    expect(prior(candidate)!.meta!.criteria!.filter((x) => !x.passed).map((x) => x.id)).toEqual(['same-card']);
   });
 
   it('makes no causal claim from an overlapping incident, and still fights', () => {
@@ -115,8 +160,8 @@ describe('the demo story across seeds', () => {
     for (const seed of [3, 99, 123456]) {
       const { cases, clusters, affected } = runStory(seed);
       const radius = blastRadius(clusters[0]!, affected, { disputeFee: minor(1_500), analystMinutesPerDispute: 25 });
-      totals.add(`${clusters[0]!.totalAmount}/${radius.proactiveRefundTotal}`);
-      expect(cases).toHaveLength(60);
+      totals.add(JSON.stringify([clusters[0]!.totals, radius.proactiveRefundTotals]));
+      expect(cases).toHaveLength(STORY.disputes);
       expect(clusters.map((c) => c.disputes.length)).toEqual([STORY.clusterSize]);
       expect(blastRadius(clusters[0]!, affected, { disputeFee: minor(1_500), analystMinutesPerDispute: 25 }).customersNotYetDisputed).toBe(
         STORY.notYetDisputed,

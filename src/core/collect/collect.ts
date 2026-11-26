@@ -10,14 +10,21 @@
 //   treat them as evidence created after the dispute.
 // - Initiated, approved and completed are different states.
 // - Text classification is always kind 'inference' and quotes the phrase it came from (invariant 6).
-// - An incident is a cause only through an explicit link (invariant 7).
+// - An incident is a cause only through an explicit link (invariant 7), and only while the harm it
+//   caused is still there: a dropped refund that was later paid and settled is no longer a cause (B5).
+// - Customer messages count only from tickets about this order, or whose order is unknown (B4).
+// - The processor's view of a refund (charges.amountRefunded) is read separately from the merchant's
+//   refund service, so the two can be reconciled (D1).
 
 import { classifyMessage, type MessageLabel } from '../classify/lexicon';
 import { findReason } from '../rubric/reasons';
 import type { ChargeRow, CollectInput, CollectSource, ObservedIncident, ObservedRefund, OrderRow } from '../sources/types';
-import type { EvidenceItem, EvidenceType, ReasonKey } from '../types';
+import type { EvidenceCriterion, EvidenceItem, EvidenceType, ReasonKey } from '../types';
 
 const DAY_MS = 86_400_000;
+const MINUTE_MS = 60_000;
+/** Two identical orders this close together may be one purchase submitted twice (review B7). */
+const POSSIBLE_DUPLICATE_MS = 10 * MINUTE_MS;
 
 /**
  * Evidence only one reason's rubric reads. Other reasons skip it so the exhibit list stays focused;
@@ -35,9 +42,6 @@ const ONLY_FOR: Partial<Record<EvidenceType, readonly ReasonKey[]>> = {
   cancellation: ['visa-13.2'],
 };
 
-/** Customer-message labels that mean the customer raised a problem with us. */
-const COMPLAINT_LABELS: readonly MessageLabel[] = ['complained', 'requested-refund', 'denied-receipt'];
-
 const ms = (iso: string | null | undefined): number | null => {
   if (!iso) return null;
   const t = Date.parse(iso);
@@ -50,6 +54,38 @@ interface Context {
   reason: ReasonKey | null;
   order: OrderRow | null;
   customerId: string | null;
+  /** What the processor shows for each refund the refund service marked completed. Null: not read yet. */
+  settlement: Map<string, Settlement> | null;
+}
+
+interface Settlement {
+  settled: boolean;
+  charge: ChargeRow;
+}
+
+const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+/**
+ * Reconcile the refund service against the processor: allocate what the processor has refunded on each
+ * charge to that charge's completed refunds, in the order they completed. A refund the allocation
+ * cannot cover was marked sent but never reached the card.
+ */
+function reconcile(input: CollectInput): Map<string, Settlement> {
+  const out = new Map<string, Settlement>();
+  const completed = input.refunds
+    .filter((r) => r.status === 'completed')
+    .sort((a, b) => (ms(a.completedAt) ?? Infinity) - (ms(b.completedAt) ?? Infinity) || byId(a, b));
+  const remaining = new Map<string, number>();
+  for (const r of completed) {
+    const charge = input.charges.find((c) => c.id === r.chargeId);
+    if (!charge) continue;
+    const left = remaining.get(charge.id) ?? charge.amountRefunded;
+    const settled = left >= r.amount;
+    if (settled) remaining.set(charge.id, left - r.amount);
+    else remaining.set(charge.id, left);
+    out.set(r.id, { settled, charge });
+  }
+  return out;
 }
 
 const orderSource = (order: OrderRow, title?: string): EvidenceItem['source'] => ({
@@ -111,16 +147,18 @@ function description({ order, input }: Context): EvidenceItem[] {
   ];
 }
 
-function refundState(r: ObservedRefund, receivedAt: number | null): { state: string; at: string } {
+function refundState(r: ObservedRefund, receivedAt: number | null, disputed: number): { state: string; at: string } {
   switch (r.status) {
     case 'completed': {
       const done = ms(r.completedAt);
-      const before = done !== null && receivedAt !== null && done <= receivedAt;
-      return { state: before ? 'completed-before-dispute' : 'completed-after-dispute', at: r.completedAt ?? r.requestedAt };
+      // A completion with no date cannot be placed before or after the dispute.
+      if (done === null || receivedAt === null) return { state: 'completed-date-unknown', at: r.requestedAt };
+      return { state: done <= receivedAt ? 'completed-before-dispute' : 'completed-after-dispute', at: r.completedAt! };
     }
     case 'approved':
-      // A person said yes but no money moved: the refund is owed.
-      return { state: 'approved-not-completed', at: r.approvedAt ?? r.requestedAt };
+      // A person said yes but no money moved: the refund is owed. Owing less than the disputed amount is
+      // not the same as the customer being right about all of it (review B6).
+      return { state: r.amount < disputed ? 'partial-approved-not-completed' : 'approved-not-completed', at: r.approvedAt ?? r.requestedAt };
     case 'initiated':
       return { state: 'initiated', at: r.approvedAt ?? r.requestedAt };
     case 'declined':
@@ -150,10 +188,10 @@ function refunds({ input, order }: Context): EvidenceItem[] {
     ];
   }
   return [...input.refunds]
-    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .sort(byId)
     .map((r) => {
-      const { state, at } = refundState(r, received);
-      const meta: EvidenceItem['meta'] = {};
+      const { state, at } = refundState(r, received, input.dispute.amount);
+      const meta: EvidenceItem['meta'] = { refundId: r.id, amount: r.amount };
       if (r.linkedIncident) meta.linkedIncident = r.linkedIncident;
       if (r.linkedDeploy) meta.linkedDeploy = r.linkedDeploy;
       const notes = [r.ticketKey ? `Support ticket ${r.ticketKey}` : null, r.declineReason ? `Declined: ${r.declineReason}` : null].filter(Boolean);
@@ -165,8 +203,43 @@ function refunds({ input, order }: Context): EvidenceItem[] {
         source: { kind: 'sql' as const, key: `refunds/${r.id}`, title: `Refund ${r.id}` },
         at,
         ...(notes.length ? { note: notes.join('. ') } : {}),
-        ...(Object.keys(meta).length ? { meta } : {}),
+        meta,
       };
+    });
+}
+
+const dollars = (cents: number) => `${(cents / 100).toFixed(2)}`;
+
+/**
+ * The processor's view of each refund the refund service marked completed (review D1). Settled: the
+ * processor refunded at least that amount on the charge. Not settled: the refund service says sent, but
+ * the money never reached the card.
+ */
+function processorRefunds({ input, settlement }: Context): EvidenceItem[] {
+  if (!settlement) return [];
+  return [...input.refunds]
+    .sort(byId)
+    .flatMap((r) => {
+      const s = settlement.get(r.id);
+      if (!s) return [];
+      const meta: EvidenceItem['meta'] = { refundId: r.id, amount: r.amount, chargeId: s.charge.id };
+      if (r.linkedIncident) meta.linkedIncident = r.linkedIncident;
+      if (r.linkedDeploy) meta.linkedDeploy = r.linkedDeploy;
+      return [
+        {
+          id: `ev-processor-refund-${r.id}`,
+          type: 'processor-refund' as const,
+          state: s.settled ? 'settled' : 'not-settled',
+          kind: 'fact' as const,
+          source: { kind: 'sql' as const, key: `charges/${s.charge.id}`, title: `Charge ${s.charge.id} at the processor` },
+          // A missing refund is an absence, dated like the others at the dispute's arrival.
+          at: s.settled ? (s.charge.refundedAt ?? r.completedAt ?? r.requestedAt) : input.dispute.receivedAt,
+          note: s.settled
+            ? `The processor shows ${dollars(s.charge.amountRefunded)} refunded on ${s.charge.id}, covering ${r.id}.`
+            : `The refund service marked ${r.id} (${dollars(r.amount)}) as sent${r.completedAt ? ` on ${r.completedAt.slice(0, 10)}` : ''}, but the processor shows ${dollars(s.charge.amountRefunded)} refunded on ${s.charge.id}.`,
+          meta,
+        },
+      ];
     });
 }
 
@@ -176,11 +249,34 @@ function orderPairs({ input }: Context): EvidenceItem[] {
   const others = input.charges
     .filter((c) => c.id !== disputed.id && c.amount === disputed.amount && c.currency === disputed.currency)
     .sort((a, b) => (a.chargedAt < b.chargedAt ? -1 : a.chargedAt > b.chargedAt ? 1 : a.id < b.id ? -1 : 1));
+  if (others.length === 0) {
+    // Recorded absence: the charges on this order, and the customer's same-amount charges within a week,
+    // were read and there is no second one (review B7).
+    return [
+      {
+        id: `ev-order-pair-only-${disputed.id}`,
+        type: 'order-pair',
+        state: 'only-charge',
+        kind: 'fact',
+        source: { kind: 'sql', key: `charges?order=${disputed.orderId}`, title: `Charges on ${disputed.orderId}` },
+        at: input.dispute.receivedAt,
+        note: `${disputed.id} is the only charge on ${disputed.orderId}, and the customer has no other charge of the same amount within 7 days.`,
+      },
+    ];
+  }
   return others.map((other: ChargeRow) => {
     let state: string;
     let at = other.chargedAt;
+    let note = `Disputed charge ${disputed.id} is on ${disputed.orderId}; this charge is on ${other.orderId}.`;
+    const apart = Math.abs((ms(other.chargedAt) ?? 0) - (ms(disputed.chargedAt) ?? 0));
     if (other.orderId !== disputed.orderId) {
-      state = 'distinct';
+      // Two orders for the same amount minutes apart may be one purchase submitted twice (review B7).
+      if (other.customerId === disputed.customerId && apart <= POSSIBLE_DUPLICATE_MS) {
+        state = 'possible-duplicate';
+        note = `${disputed.id} on ${disputed.orderId} and ${other.id} on ${other.orderId} are for the same amount, ${Math.round(apart / MINUTE_MS)} minutes apart. Check whether the customer meant to buy twice.`;
+      } else {
+        state = 'distinct';
+      }
     } else if (other.refundedAt || disputed.refundedAt) {
       state = 'duplicate-refunded';
       at = (other.refundedAt ?? disputed.refundedAt)!;
@@ -194,7 +290,7 @@ function orderPairs({ input }: Context): EvidenceItem[] {
       kind: 'fact' as const,
       source: { kind: 'sql' as const, key: `charges/${other.id}`, title: `Charge ${other.id} on ${other.orderId}` },
       at,
-      note: `Disputed charge ${disputed.id} is on ${disputed.orderId}; this charge is on ${other.orderId}.`,
+      note,
     };
   });
 }
@@ -205,7 +301,18 @@ const CAUSED: Record<ObservedIncident['effect'], string> = {
   other: 'caused-charge-problem',
 };
 
-function incidents({ input, reason, order }: Context): EvidenceItem[] {
+/**
+ * Whether every refund on this order linked to the incident has since been paid and settled (review B5).
+ * Unknown settlement counts as still owed. No linked refund: the link came another way, so it stands.
+ */
+function repaired(incidentKey: string, { input, settlement }: Context): boolean {
+  const linked = input.refunds.filter((r) => r.linkedIncident === incidentKey);
+  if (linked.length === 0 || !settlement) return false;
+  return linked.every((r) => r.status === 'completed' && settlement.get(r.id)?.settled === true);
+}
+
+function incidents(ctx: Context): EvidenceItem[] {
+  const { input, reason, order } = ctx;
   if (input.incidents.length === 0) {
     // Recorded absence: the incident search ran and found nothing linked or overlapping. Only the
     // charged-twice rubric reads it, so other reasons skip it.
@@ -227,19 +334,23 @@ function incidents({ input, reason, order }: Context): EvidenceItem[] {
     .sort((a, b) => (a.windowStart < b.windowStart ? -1 : a.windowStart > b.windowStart ? 1 : a.key < b.key ? -1 : 1))
     .map((i) => {
       const explicit = i.link === 'explicit';
+      const fixed = explicit && i.effect === 'dropped-refunds' && repaired(i.key, ctx);
+      const causes = explicit && !fixed;
       const meta: EvidenceItem['meta'] = { windowStart: i.windowStart, windowEnd: i.windowEnd };
       // The incident-to-deploy link is explicit, but it only explains this dispute when the incident does.
-      if (explicit && i.linkedDeploy) meta.linkedDeploy = i.linkedDeploy;
+      if (causes && i.linkedDeploy) meta.linkedDeploy = i.linkedDeploy;
       return {
         id: `ev-incident-${i.key}`,
         type: 'incident' as const,
-        state: explicit ? CAUSED[i.effect] : 'unrelated',
+        state: fixed ? 'dropped-refund-repaired' : causes ? CAUSED[i.effect] : 'unrelated',
         kind: 'fact' as const,
         source: { kind: 'jira' as const, key: i.key, title: i.title, ...(i.url ? { url: i.url } : {}) },
         at: i.windowStart,
-        note: explicit
-          ? `Explicitly linked to this order or charge${i.linkedDeploy ? `; caused by ${i.linkedDeploy}` : ''}.`
-          : 'Open around the time of purchase but not linked to this order or charge. Not a cause.',
+        note: fixed
+          ? 'Linked to this order, but the refund it dropped has since been paid and has reached the card. No longer a cause.'
+          : causes
+            ? `Explicitly linked to this order or charge${i.linkedDeploy ? `; caused by ${i.linkedDeploy}` : ''}.`
+            : 'Open around the time of purchase but not linked to this order or charge. Not a cause.',
         meta,
       };
     });
@@ -262,29 +373,67 @@ function paymentChecks({ order }: Context): EvidenceItem[] {
   ];
 }
 
-/** Visa Compelling Evidence 3.0: two or more undisputed orders 120 to 365 days earlier sharing IP or device. */
+const present = (v: string | null | undefined): v is string => typeof v === 'string' && v.trim().length > 0;
+/** Two identifiers match only when both are present and equal: empty or missing never matches. */
+const same = (a: string | null | undefined, b: string | null | undefined) => present(a) && present(b) && a === b;
+
+/**
+ * Visa Compelling Evidence 3.0 (review B8): two or more earlier transactions on the same card, each 120 to
+ * 365 days before the dispute was received, never disputed or reported as fraud, and each sharing at least
+ * two of IP address, device, account and shipping address with the disputed order, at least one of them
+ * IP address or device. Each criterion is listed so the UI can tell a candidate from a qualified case.
+ * Visa rules only: other networks get no item.
+ */
 function compellingEvidence({ input, order, customerId }: Context): EvidenceItem[] {
   if (!order) return [];
-  const purchased = ms(order.purchasedAt)!;
-  const qualifying = input.priorOrders.filter((p) => {
+  const network = input.dispute.network ?? 'unknown';
+  if (network !== 'visa' && network !== 'unknown') return [];
+  const anchor = ms(input.dispute.receivedAt) ?? ms(order.purchasedAt)!;
+  const tested = input.priorOrders.map((p) => {
     const t = ms(p.purchasedAt);
-    if (t === null || p.disputed) return false;
-    const age = (purchased - t) / DAY_MS;
-    return age >= 120 && age <= 365 && (p.ip === order.ip || p.deviceId === order.deviceId);
+    const age = t === null ? null : (anchor - t) / DAY_MS;
+    const ipOrDevice = same(p.ip, order.ip) || same(p.deviceId, order.deviceId);
+    const shared = [same(p.ip, order.ip), same(p.deviceId, order.deviceId), same(p.accountId, order.accountId), same(p.shippingAddressHash, order.shippingAddressHash)].filter(Boolean).length;
+    const checks = {
+      'same-card': same(p.cardFingerprint, order.cardFingerprint),
+      window: age !== null && age >= 120 && age <= 365,
+      clean: !p.disputed && !p.fraudReported,
+      identity: ipOrDevice && shared >= 2,
+    };
+    return { p, checks, all: Object.values(checks).every(Boolean) };
   });
-  const ids = qualifying.map((p) => p.id).sort();
-  // Recorded absence when not eligible: the customer's order history was read in full.
+  const count = (id: keyof (typeof tested)[number]['checks']) => tested.filter((x) => x.checks[id]).length;
+  const LABELS: Record<keyof (typeof tested)[number]['checks'], string> = {
+    'same-card': 'Earlier transactions on the same card',
+    window: 'Made 120 to 365 days before the dispute',
+    clean: 'Never disputed or reported as fraud',
+    identity: 'Share two of IP address, device, account and shipping address, one of them IP address or device',
+  };
+  const criteria: EvidenceCriterion[] = (Object.keys(LABELS) as (keyof typeof LABELS)[]).map((id) => ({
+    id,
+    label: LABELS[id],
+    passed: count(id) >= 2,
+    detail: `${count(id)} of ${tested.length} earlier ${tested.length === 1 ? 'order' : 'orders'}`,
+  }));
+  const qualifying = tested.filter((x) => x.all).map((x) => x.p.id).sort();
+  const state = qualifying.length >= 2 ? 'ce30-eligible' : count('identity') >= 2 ? 'ce30-candidate' : 'not-eligible';
+  const failed = criteria.filter((c) => !c.passed).map((c) => c.label.toLowerCase());
+  // Recorded absence when not eligible: the order history was read in full.
   return [
     {
       id: `ev-prior-orders-${order.id}`,
       type: 'prior-orders',
-      state: qualifying.length >= 2 ? 'ce30-eligible' : 'not-eligible',
+      state,
       kind: 'fact',
-      source: { kind: 'sql', key: `orders?customer=${customerId ?? order.customerId}`, title: 'Earlier orders from this customer' },
+      source: { kind: 'sql', key: `orders?customer=${customerId ?? order.customerId}`, title: 'Earlier orders from this customer or card' },
       at: order.purchasedAt,
-      note: ids.length
-        ? `${ids.length} earlier undisputed ${ids.length === 1 ? 'order' : 'orders'} 120 to 365 days old with the same IP or device: ${ids.join(', ')}.`
-        : 'No earlier undisputed orders 120 to 365 days old with the same IP or device.',
+      note:
+        state === 'ce30-eligible'
+          ? `${qualifying.length} earlier transactions meet every Compelling Evidence 3.0 criterion: ${qualifying.join(', ')}.`
+          : state === 'ce30-candidate'
+            ? `Compelling Evidence 3.0 candidate: earlier orders look like the same person, but not every criterion is met (${failed.join('; ')}).`
+            : 'Not enough earlier transactions meet the Compelling Evidence 3.0 criteria.',
+      meta: { criteria },
     },
   ];
 }
@@ -324,15 +473,19 @@ function policy({ input, order }: Context): EvidenceItem[] {
       source: { kind: 'confluence', key: page.pageId, title: page.title, ...(page.url ? { url: page.url } : {}) },
       at: order.purchasedAt,
       note: `Accepted ${page.version} at checkout.`,
-      meta: { version: page.version, effectiveFrom: page.effectiveFrom, effectiveTo: page.effectiveTo },
+      // The purchase date travels with the policy, so the in-force check runs without webhook metadata (B11).
+      meta: { version: page.version, effectiveFrom: page.effectiveFrom, effectiveTo: page.effectiveTo, purchasedAt: order.purchasedAt },
     },
   ];
 }
 
-function customerMessages({ input, order, customerId }: Context): EvidenceItem[] {
-  const tickets = [...input.tickets].sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.key < b.key ? -1 : 1));
+function customerMessages({ input, order }: Context): EvidenceItem[] {
+  // Only tickets about this order count. A ticket whose order is unknown might be about it, so it is read;
+  // one about another order is not this dispute's evidence (review B4).
+  const orderId = order?.id ?? input.dispute.orderId;
+  const about = input.tickets.filter((t) => t.orderId === null || orderId === null || t.orderId === orderId);
+  const tickets = [...about].sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.key < b.key ? -1 : 1));
   const items: EvidenceItem[] = [];
-  let complained = false;
   for (const t of tickets) {
     t.messages.forEach((m, i) => {
       if (m.author !== 'customer') return;
@@ -340,7 +493,6 @@ function customerMessages({ input, order, customerId }: Context): EvidenceItem[]
       for (const match of classifyMessage(m.text)) {
         if (seen.has(match.label)) continue;
         seen.add(match.label);
-        if (COMPLAINT_LABELS.includes(match.label)) complained = true;
         items.push({
           id: `ev-message-${t.key}-${i}-${match.label}`,
           type: 'customer-message',
@@ -353,21 +505,19 @@ function customerMessages({ input, order, customerId }: Context): EvidenceItem[]
       }
     });
   }
-  // Recorded absence: every ticket from this customer was read and none raised a problem. With no
-  // tickets at all the customer never contacted us, which is the plainest case of no complaint.
-  // Still an inference: it rests on the lexicon not finding a complaint.
-  if (!complained && order && customerId) {
+  // Recorded absence: the customer has no ticket about this order at all, so they never raised a problem
+  // with us (review B2). When tickets exist, nothing is inferred from what the lexicon did not find: a
+  // person reads them. Still an inference, because it rests on tickets being filed against the right order.
+  if (order && tickets.length === 0) {
+    const elsewhere = input.tickets.length;
     items.push({
-      id: `ev-no-complaint-${customerId}`,
+      id: `ev-no-complaint-${order.id}`,
       type: 'customer-message',
       state: 'no-complaint',
       kind: 'inference',
-      source: { kind: 'jsm', key: `tickets?customer=${customerId}`, title: 'Support tickets from this customer' },
+      source: { kind: 'jsm', key: `tickets?order=${order.id}`, title: 'Support tickets about this order' },
       at: input.dispute.receivedAt,
-      note:
-        tickets.length === 0
-          ? 'This customer has no support tickets.'
-          : `${tickets.length} support ${tickets.length === 1 ? 'ticket' : 'tickets'} (${tickets.map((t) => t.key).join(', ')}), none raising a problem.`,
+      note: `The customer has no support tickets about this order${elsewhere ? ` (${elsewhere} about other orders, not counted)` : ''}.`,
     });
   }
   return items;
@@ -378,6 +528,7 @@ const COLLECTORS: readonly ((ctx: Context) => EvidenceItem[])[] = [
   signature,
   description,
   refunds,
+  processorRefunds,
   orderPairs,
   incidents,
   paymentChecks,
@@ -400,6 +551,7 @@ const SOURCE_OF: Record<EvidenceType, CollectSource> = {
   cancellation: 'order',
   'customer-message': 'tickets',
   refund: 'refunds',
+  'processor-refund': 'settlements',
   incident: 'incidents',
   deploy: 'incidents',
   policy: 'policies',
@@ -407,14 +559,15 @@ const SOURCE_OF: Record<EvidenceType, CollectSource> = {
 
 export function collectEvidence(input: CollectInput): EvidenceItem[] {
   const reason = findReason(input.dispute.reasonCode)?.key ?? null;
+  const pending = new Set(input.pending ?? []);
   const ctx: Context = {
     input,
     reason,
     order: input.order,
     customerId: input.dispute.customer ?? input.order?.customerId ?? null,
+    settlement: pending.has('settlements') ? null : reconcile(input),
   };
   const relevant = (e: EvidenceItem) => reason === null || !ONLY_FOR[e.type] || ONLY_FOR[e.type]!.includes(reason);
-  const pending = new Set(input.pending ?? []);
   const read = (e: EvidenceItem) => !pending.has(SOURCE_OF[e.type]);
   // Collector order, then each collector's own sort, gives a stable exhibit order.
   return COLLECTORS.flatMap((collect) => collect(ctx)).filter(relevant).filter(read);

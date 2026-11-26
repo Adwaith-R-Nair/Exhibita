@@ -37,6 +37,8 @@ describe('normalizeDisputeEvent', () => {
       respondBy: new Date(1766000000 * 1000).toISOString(),
       receivedAt: new Date(1764000000 * 1000).toISOString(),
       purchasedAt: '2026-10-02T09:30:00.000Z',
+      network: 'unknown',
+      networkReasonCode: null,
     });
   });
 
@@ -46,6 +48,7 @@ describe('normalizeDisputeEvent', () => {
     ['duplicate', 'visa-12.6.1'],
     ['fraudulent', 'visa-10.4'],
     ['subscription_canceled', 'visa-13.2'],
+    ['credit_not_processed', 'visa-13.6'],
     ['general', 'unknown'],
     ['something_new', 'unknown'],
   ])('maps processor reason %s to %s', (reason, expected) => {
@@ -86,5 +89,42 @@ describe('normalizeDisputeEvent', () => {
   it('ignores an unparseable purchase date instead of storing garbage', () => {
     const r = normalizeDisputeEvent(event({}, { metadata: { purchased_at: 'yesterday' } }));
     expect(r.ok && r.dispute.purchasedAt).toBeNull();
+  });
+
+  describe('card network (review B9, B10)', () => {
+    it('reads the brand and the raw network reason code from payment_method_details', () => {
+      const r = normalizeDisputeEvent(
+        event({}, { reason: 'credit_not_processed', payment_method_details: { type: 'card', card: { brand: 'visa', network_reason_code: '13.6' } } }),
+      );
+      expect(r.ok && r.dispute).toMatchObject({ reasonCode: 'visa-13.6', network: 'visa', networkReasonCode: '13.6' });
+    });
+
+    it.each([
+      ['mastercard', 'mastercard'],
+      ['MasterCard', 'mastercard'],
+      ['amex', 'amex'],
+      ['american_express', 'amex'],
+      ['discover', 'discover'],
+      ['unionpay', 'unknown'],
+      [42, 'unknown'],
+    ])('maps brand %s to %s', (brand, network) => {
+      const r = normalizeDisputeEvent(event({}, { payment_method_details: { card: { brand } } }));
+      expect(r.ok && r.dispute.network).toBe(network);
+    });
+
+    it('falls back to a top-level network field', () => {
+      const r = normalizeDisputeEvent(event({}, { network: 'mastercard', network_reason_code: '4855' }));
+      expect(r.ok && r.dispute).toMatchObject({ network: 'mastercard', networkReasonCode: '4855' });
+    });
+  });
+
+  it.each([
+    ['an out-of-range created time', { created: 1e20 }, {}],
+    ['a non-numeric created time', { created: 'yesterday' }, {}],
+    ['an out-of-range due date', {}, { evidence_details: { due_by: 1e20 } }],
+  ])('returns malformed-dispute, never throws, for %s', (_label, top, object) => {
+    let r: ReturnType<typeof normalizeDisputeEvent> | undefined;
+    expect(() => (r = normalizeDisputeEvent(event(top, object)))).not.toThrow();
+    expect(r).toMatchObject({ ok: false, error: 'malformed-dispute' });
   });
 });

@@ -13,7 +13,7 @@ const ev = (type: EvidenceType, state: string, key: string, kind: 'fact' | 'infe
   at: '2026-11-01T10:00:00Z',
 });
 
-const dispute = (reasonCode: string, dollars: number): Dispute => ({
+const dispute = (reasonCode: string, dollars: number, overrides: Partial<Dispute> = {}): Dispute => ({
   externalId: 'dp_test',
   chargeId: 'ch_test',
   orderId: 'ORD-1',
@@ -24,6 +24,15 @@ const dispute = (reasonCode: string, dollars: number): Dispute => ({
   reasonCode,
   respondBy: '2026-12-04T00:00:00Z',
   receivedAt: '2026-11-20T00:00:00Z',
+  ...overrides,
+});
+const refundEv = (state: string, refundId: string, cents: number): EvidenceItem => ({
+  ...ev('refund', state, `refunds/${refundId}`),
+  meta: { refundId, amount: cents },
+});
+const processorEv = (state: string, refundId: string, cents: number): EvidenceItem => ({
+  ...ev('processor-refund', state, 'charges/ch_test'),
+  meta: { refundId, amount: cents, chargeId: 'ch_test' },
 });
 
 describe('reason catalogue', () => {
@@ -150,7 +159,7 @@ describe('not as described (Visa 13.3)', () => {
   it('marks a requirement contradicted when evidence points both ways (validation case 5)', () => {
     const r = evaluateDispute(dispute('visa-13.3', 80), [
       ev('product-description', 'matches-delivered', 'CONF-7'),
-      ev('customer-message', 'acknowledged-receipt', 'SUP-42', 'inference'),
+      ev('customer-message', 'no-complaint', 'SUP-42', 'inference'),
       ev('customer-message', 'complained', 'SUP-43', 'inference'),
       ev('refund', 'none', 'ORD-8'),
     ]);
@@ -270,5 +279,196 @@ describe('plain-English explanations', () => {
     const against = evaluateDispute(dispute('visa-10.4', 80), [ev('3ds', 'not-attempted', 'ORD-1'), ev('prior-orders', 'not-eligible', 'ORD-1')]);
     expect(against.recommendation).toBe('investigate');
     expect(against.why).toMatch(/^Evidence is against us on:/);
+  });
+});
+
+describe('customer-message labels are facets, not exclusive states (review B3)', () => {
+  it('does not treat "Got it" plus "no complaint" as a conflict', () => {
+    const r = evaluateDispute(dispute('visa-13.1', 60), [
+      ev('delivery', 'delivered', 'ORD-1'),
+      ev('refund', 'none', 'ORD-1'),
+      ev('customer-message', 'acknowledged-receipt', 'SUP-1', 'inference'),
+      ev('customer-message', 'no-complaint', 'SUP-2', 'inference'),
+      ev('customer-message', 'mentioned-bank', 'SUP-3', 'inference'),
+    ]);
+    const ack = r.checks.find((c) => c.id === 'customer-ack')!;
+    expect(ack.status).toBe('met');
+    expect(ack.contradictions).toEqual([]);
+  });
+
+  it('leaves the acknowledgement missing, not failed, when the customer never wrote to us', () => {
+    const r = evaluateDispute(dispute('visa-13.1', 60), [
+      ev('delivery', 'delivered', 'ORD-1'),
+      ev('refund', 'none', 'ORD-1'),
+      ev('customer-message', 'no-complaint', 'tickets?order=ORD-1', 'inference'),
+    ]);
+    expect(r.checks.find((c) => c.id === 'customer-ack')?.status).toBe('missing');
+    expect(r.recommendation).toBe('fight');
+  });
+
+  it('still counts a listed opposing label against the requirement', () => {
+    const r = evaluateDispute(dispute('visa-13.1', 60), [
+      ev('delivery', 'delivered', 'ORD-1'),
+      ev('refund', 'none', 'ORD-1'),
+      ev('customer-message', 'acknowledged-receipt', 'SUP-1', 'inference'),
+      ev('customer-message', 'denied-receipt', 'SUP-2', 'inference'),
+    ]);
+    const ack = r.checks.find((c) => c.id === 'customer-ack')!;
+    expect(ack.status).toBe('contradicted');
+    expect(ack.contradictions.map((e) => e.source.key)).toEqual(['SUP-2']);
+  });
+
+  it('does not let "Got it" stand in for "no complaint" on a not-as-described dispute', () => {
+    const r = evaluateDispute(dispute('visa-13.3', 80), [
+      ev('product-description', 'matches-delivered', 'CONF-7'),
+      ev('customer-message', 'acknowledged-receipt', 'SUP-40', 'inference'),
+      ev('refund', 'none', 'ORD-8'),
+    ]);
+    expect(r.checks.find((c) => c.id === 'no-prior-complaint')?.status).toBe('missing');
+    expect(r.recommendation).toBe('investigate');
+  });
+
+  it('flags a customer who says they cancelled when the record says they did not', () => {
+    const r = evaluateDispute(dispute('visa-13.2', 30), [
+      ev('cancellation', 'none-before-charge', 'SUB-1'),
+      ev('customer-message', 'cancelled', 'SUP-5', 'inference'),
+    ]);
+    expect(r.checks.find((c) => c.id === 'not-cancelled')?.status).toBe('contradicted');
+    expect(r.recommendation).toBe('investigate');
+  });
+
+  it('keeps exclusive behaviour for other types (a declined and an owed refund still conflict)', () => {
+    const r = evaluateDispute(dispute('visa-13.1', 60), [
+      ev('delivery', 'delivered', 'ORD-1'),
+      ev('delivery', 'delivered-address-mismatch', 'ORD-1b'),
+      ev('refund', 'none', 'ORD-1'),
+    ]);
+    expect(r.checks.find((c) => c.id === 'delivery-proof')?.status).toBe('contradicted');
+  });
+});
+
+describe('refund amounts and credits (review B6)', () => {
+  it('investigates, rather than conceding, when only part of the amount is owed', () => {
+    const r = evaluateDispute(dispute('visa-13.3', 249), [
+      ev('product-description', 'matches-delivered', 'CONF-7'),
+      ev('customer-message', 'no-complaint', 'SUP-1', 'inference'),
+      refundEv('partial-approved-not-completed', 'REF-7', 5000),
+    ]);
+    expect(r.recommendation).toBe('investigate');
+    expect(r.checks.find((c) => c.id === 'refund-status')?.status).toBe('failed');
+  });
+
+  it.each(['visa-13.1', 'visa-13.3', 'visa-13.6'])('%s: a full credit issued and settled before the dispute is a defense', (reason) => {
+    const r = evaluateDispute(dispute(reason, 89), [
+      ev('delivery', 'lost', 'ORD-1'),
+      refundEv('completed-before-dispute', 'REF-8', 8900),
+      processorEv('settled', 'REF-8', 8900),
+    ]);
+    expect(r.recommendation).toBe('fight');
+    expect(r.canSubmit).toBe(true);
+    expect(r.checks[0]).toMatchObject({ id: 'credit-issued', label: 'Credit issued before the dispute', status: 'met', required: true });
+    expect(r.why).toMatch(/^Credit issued before the dispute/);
+    expect(r.why).toMatch(/REF-8/);
+    expect(r.coverage.label).toBe('Strong');
+  });
+
+  it('is no defense when the processor never settled it, or it covered only part of the amount', () => {
+    const unsettled = evaluateDispute(dispute('visa-13.1', 89), [
+      ev('delivery', 'lost', 'ORD-1'),
+      refundEv('completed-before-dispute', 'REF-8', 8900),
+      processorEv('not-settled', 'REF-8', 8900),
+    ]);
+    expect(unsettled.checks.map((c) => c.id)).not.toContain('credit-issued');
+    expect(unsettled.recommendation).toBe('investigate');
+    const partial = evaluateDispute(dispute('visa-13.1', 89), [
+      ev('delivery', 'lost', 'ORD-1'),
+      refundEv('completed-before-dispute', 'REF-8', 2000),
+      processorEv('settled', 'REF-8', 2000),
+    ]);
+    expect(partial.checks.map((c) => c.id)).not.toContain('credit-issued');
+  });
+
+  it('does not offer the credit defense where the rubric does not allow it', () => {
+    const r = evaluateDispute(dispute('visa-10.4', 89), [
+      refundEv('completed-before-dispute', 'REF-8', 8900),
+      processorEv('settled', 'REF-8', 8900),
+    ]);
+    expect(r.checks.map((c) => c.id)).not.toContain('credit-issued');
+  });
+
+  it('lets a concession beat the credit defense', () => {
+    const r = evaluateDispute(dispute('visa-13.1', 89), [
+      refundEv('completed-before-dispute', 'REF-8', 8900),
+      processorEv('settled', 'REF-8', 8900),
+      refundEv('approved-not-completed', 'REF-9', 8900),
+    ]);
+    expect(r.recommendation).toBe('accept');
+  });
+});
+
+describe('credit not processed (Visa 13.6, review B10)', () => {
+  it('is in the catalogue', () => {
+    expect(findReason('Visa 13.6')?.label).toBe('Credit not processed');
+  });
+
+  it('fights when the refund service completed the credit before the dispute', () => {
+    const r = evaluateDispute(dispute('visa-13.6', 249), [refundEv('completed-before-dispute', 'REF-1', 24900)]);
+    expect(r.recommendation).toBe('fight');
+    expect(r.coverage.label).toBe('Strong');
+    expect(r.checks.find((c) => c.id === 'credit-processed')?.label).toBe('The promised credit was processed, or none was due');
+  });
+
+  it.each(['none', 'declined-per-policy'])('fights when no credit was owed (%s)', (state) => {
+    expect(evaluateDispute(dispute('visa-13.6', 60), [ev('refund', state, 'ORD-1')]).recommendation).toBe('fight');
+  });
+
+  it('accepts when the credit was approved and never processed', () => {
+    const r = evaluateDispute(dispute('visa-13.6', 60), [refundEv('approved-not-completed', 'REF-2', 6000)]);
+    expect(r.recommendation).toBe('accept');
+    expect(r.why).toMatch(/REF-2|refunds\/REF-2/);
+  });
+
+  it('investigates a refund that is only in progress, or completed with no date', () => {
+    expect(evaluateDispute(dispute('visa-13.6', 60), [ev('refund', 'initiated', 'REF-3')]).recommendation).toBe('investigate');
+    expect(evaluateDispute(dispute('visa-13.6', 60), [ev('refund', 'completed-date-unknown', 'REF-3')]).recommendation).toBe('investigate');
+  });
+});
+
+describe('card network (review B9)', () => {
+  const strong = [ev('delivery', 'delivered', 'ORD-1'), ev('refund', 'none', 'ORD-1')];
+
+  it.each([
+    ['mastercard', 'Mastercard'],
+    ['amex', 'American Express'],
+    ['discover', 'Discover'],
+  ] as const)('does not judge a %s dispute by Visa rules', (network, name) => {
+    const r = evaluateDispute(dispute('visa-13.1', 60, { network }), strong);
+    expect(r.supported).toBe(false);
+    expect(r.checks).toEqual([]);
+    expect(r.recommendation).toBe('investigate');
+    expect(r.canSubmit).toBe(false);
+    expect(r.why).toBe(`${name} disputes are not supported yet; review by hand.`);
+  });
+
+  it('applies Visa rules to a Visa dispute and says so', () => {
+    const r = evaluateDispute(dispute('visa-13.1', 60, { network: 'visa' }), strong);
+    expect(r.recommendation).toBe('fight');
+    expect(r.notes).toEqual(['Judged against Visa dispute rules.']);
+  });
+
+  it('applies Visa rules when the network is unknown, and notes it', () => {
+    for (const d of [dispute('visa-13.1', 60, { network: 'unknown' }), dispute('visa-13.1', 60)]) {
+      const r = evaluateDispute(d, strong);
+      expect(r.recommendation).toBe('fight');
+      expect(r.notes?.[0]).toMatch(/network is unknown/i);
+    }
+  });
+});
+
+describe('wording (review B13, D-08)', () => {
+  it('never predicts the outcome of a fight', () => {
+    const r = evaluateDispute(dispute('visa-13.3', 249), [ev('refund', 'approved-not-completed', 'REF-231')]);
+    expect(r.why).not.toMatch(/likely|lose|lost/i);
+    for (const reason of Object.values(REASONS)) for (const req of reason.requirements) expect(req.rule).not.toMatch(/likely/i);
   });
 });

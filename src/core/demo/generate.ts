@@ -3,9 +3,14 @@
 // whenever the wizard runs. The story's shape (one hero, a cluster of 38, 212 customers not yet
 // disputing, an unrelated incident, the other scenarios) holds for every seed.
 //
+// The story (review D1): refund-worker 3.2 marked refunds as sent without sending them. The refund
+// service says every one completed; the processor never received them. The hero is a $249 Visa 13.6
+// "credit not processed" dispute: the checklist reads the refund service and says Fight, then Exhibita
+// reconciles against the processor, finds no refund on the charge and flips to Accept.
+//
 // All data is synthetic (invariant 9). Money is integer cents in USD.
 
-import type { ReasonKey, Recommendation } from '../types';
+import type { CardNetwork, ReasonKey, Recommendation } from '../types';
 import { minor } from '../types';
 import type {
   ChargeRow,
@@ -62,9 +67,11 @@ export const DEMO_REFS = {
 export const STORY = {
   /** The hero plus 37 more disputes whose refunds the refund-worker incident dropped. */
   clusterSize: 38,
-  /** Customers whose refunds were dropped and who have not disputed. */
+  /** Customers whose refunds were marked sent but never reached them, and who have not disputed. */
   notYetDisputed: 212,
   heroAmount: 24_900,
+  /** Every dispute in the queue: the cluster plus one per other scenario. */
+  disputes: 63,
 } as const;
 
 /** The timeline, in days relative to now. */
@@ -87,6 +94,13 @@ const PROCESSOR_REASON: Record<ReasonKey, string> = {
   'visa-12.6.1': 'duplicate',
   'visa-10.4': 'fraudulent',
   'visa-13.2': 'subscription_canceled',
+  'visa-13.6': 'credit_not_processed',
+};
+
+/** The network's own reason code, as Stripe-compatible payloads carry it. */
+const NETWORK_REASON: Record<'visa' | 'mastercard', Record<ReasonKey, string>> = {
+  visa: { 'visa-13.1': '13.1', 'visa-13.3': '13.3', 'visa-12.6.1': '12.6.1', 'visa-10.4': '10.4', 'visa-13.2': '13.2', 'visa-13.6': '13.6' },
+  mastercard: { 'visa-13.1': '4855', 'visa-13.3': '4853', 'visa-12.6.1': '4834', 'visa-10.4': '4837', 'visa-13.2': '4841', 'visa-13.6': '4860' },
 };
 
 const DAY = 86_400_000;
@@ -132,7 +146,8 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
   const impacts: IncidentImpactRow[] = [];
   const pendingTickets: PendingTicket[] = [];
   const pendingDisputes: PendingDispute[] = [];
-  const devices = new Map<string, { ip: string; deviceId: string }>();
+  /** Each customer's usual IP address, device, card, account and shipping address. */
+  const identities = new Map<string, { ip: string; deviceId: string; card: string; account: string; address: string }>();
 
   const newCustomer = (): CustomerRow => {
     const n = customers.length + 1;
@@ -146,14 +161,20 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
     };
     customers.push(customer);
     // Documentation-only address ranges (RFC 5737), so no real network is named.
-    devices.set(customer.id, { ip: `${rng.pick(['203.0.113', '198.51.100'])}.${rng.int(1, 254)}`, deviceId: `dev_${rng.hex(10)}` });
+    identities.set(customer.id, {
+      ip: `${rng.pick(['203.0.113', '198.51.100'])}.${rng.int(1, 254)}`,
+      deviceId: `dev_${rng.hex(10)}`,
+      card: `card_${rng.hex(12)}`,
+      account: `acct_${pad(n)}`,
+      address: `addr_${rng.hex(12)}`,
+    });
     return customer;
   };
 
   const newOrder = (customer: CustomerRow, product: CatalogProduct, purchasedAt: string, overrides: Partial<OrderRow> = {}): OrderRow => {
     const physical = product.row.kind === 'physical';
     const signed = physical && product.price >= 15_000;
-    const device = devices.get(customer.id)!;
+    const id = identities.get(customer.id)!;
     const order: OrderRow = {
       id: `ORD-${10001 + orders.length}`,
       customerId: customer.id,
@@ -161,8 +182,8 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
       amount: minor(product.price),
       currency: 'USD',
       purchasedAt,
-      ip: device.ip,
-      deviceId: device.deviceId,
+      ip: id.ip,
+      deviceId: id.deviceId,
       termsAcceptedVersion: termsAt(purchasedAt),
       carrier: physical ? CARRIER : null,
       tracking: physical ? `DPC${rng.digits(10)}` : null,
@@ -177,6 +198,11 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
       avs: 'match',
       cvv: 'match',
       subscriptionCancelledAt: null,
+      cardFingerprint: id.card,
+      cardNetwork: 'visa',
+      accountId: id.account,
+      shippingAddressHash: physical ? id.address : null,
+      fraudReported: false,
       ...overrides,
     };
     orders.push(order);
@@ -192,6 +218,8 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
       currency: order.currency,
       chargedAt,
       refundedAt,
+      // The processor's view: only a refund it actually paid shows here.
+      amountRefunded: minor(refundedAt ? order.amount : 0),
     };
     charges.push(charge);
     return charge;
@@ -243,35 +271,37 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
   const productMix = (count: number) => rng.shuffle(Array.from({ length: count }, (_, i) => PHYSICAL[i % PHYSICAL.length]!));
 
   // -------------------------------------------------------------------------------------------------
-  // The refund-worker incident: approved refunds marked approved but never sent to the processor.
+  // The refund-worker incident: refunds marked as sent, never sent to the processor.
   // -------------------------------------------------------------------------------------------------
 
-  const refundOwed = (customer: CustomerRow, product: CatalogProduct) => {
-    const approvedAt = day(T.refundWindow[0] + rng.between(0.1, 6.5));
+  /** A refund approved and marked completed during the incident window. The processor never got it. */
+  const refundMarkedSent = (customer: CustomerRow, product: CatalogProduct) => {
+    const approvedAt = day(T.refundWindow[0] + rng.between(0.1, 6.3));
+    const completedAt = plus(approvedAt, rng.between(0.02, 0.2));
     const requestedAt = plus(approvedAt, -rng.between(0.2, 1.5));
     const purchasedAt = plus(requestedAt, -rng.between(10, 18));
     const order = newOrder(customer, product, purchasedAt);
     const charge = newCharge(order);
-    const refund = newRefund(charge, { status: 'approved', requestedAt, approvedAt });
+    const refund = newRefund(charge, { status: 'completed', requestedAt, approvedAt, completedAt });
     impacts.push({ incidentRef: DEMO_REFS.refundIncident, refundId: refund.id, chargeId: null });
     return { order, charge, refund };
   };
 
-  const chase = (customer: CustomerRow, owed: ReturnType<typeof refundOwed>, key: MessageKey, after: [number, number]) =>
+  const chase = (customer: CustomerRow, sent: ReturnType<typeof refundMarkedSent>, key: MessageKey, after: [number, number]) =>
     ticket({
       customer,
-      orderId: owed.order.id,
-      summary: 'Approved refund has not arrived',
-      messages: [say(key, plus(owed.refund.approvedAt!, rng.between(...after)))],
-      refundId: owed.refund.id,
+      orderId: sent.order.id,
+      summary: 'Refund marked as sent has not arrived',
+      messages: [say(key, plus(sent.refund.completedAt!, rng.between(...after)))],
+      refundId: sent.refund.id,
       linkedIncidentRef: DEMO_REFS.refundIncident,
     });
 
-  // The hero. It looks defensible: delivered, as described, and the customer said they got it.
+  // The hero. On its face the refund was paid before the dispute, so the checklist says Fight.
   {
     const customer = newCustomer();
-    const owed = refundOwed(customer, HERO_PRODUCT);
-    const { order, refund } = owed;
+    const sent = refundMarkedSent(customer, HERO_PRODUCT);
+    const { order, refund } = sent;
     const ack = plus(order.deliveredAt!, rng.between(0.1, 0.3));
     ticket({ customer, orderId: order.id, summary: 'Delivery confirmation', messages: [say('heroAck', ack)] });
     ticket({
@@ -280,35 +310,33 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
       summary: 'Return and refund for trail jacket',
       messages: [
         say('heroRefund', refund.requestedAt),
-        reply(`Thanks for letting us know. Your refund of ${dollars(refund.amount)} has been approved and will reach your card within 5 business days.`, refund.approvedAt!),
-        say('heroChase', plus(refund.approvedAt!, rng.between(12, 14))),
+        reply(`Thanks for sending the jacket back. Your refund of ${dollars(refund.amount)} has been sent and will reach your card within 5 business days.`, refund.completedAt!),
       ],
       refundId: refund.id,
-      linkedIncidentRef: DEMO_REFS.refundIncident,
     });
     dispute({
       order,
-      reason: 'visa-13.3',
+      reason: 'visa-13.6',
       expected: 'accept',
-      scenario: 'Hero: delivered and acknowledged, but an approved refund was dropped by the refund-worker incident',
+      scenario: 'Hero: the refund service says the refund was sent before the dispute, but the processor never received it (refund-worker incident)',
       receivedAt: recently(1.5, 5),
       hero: true,
     });
   }
 
-  // 37 more disputes from the same incident.
-  const chaseKeys: MessageKey[] = ['chaseApproved', 'chaseWhere', 'chasePlease', 'chaseAccount'];
+  // 37 more disputes from the same incident, some about the missing credit, some about the goods.
+  const chaseKeys: MessageKey[] = ['chaseSent', 'chaseWhere', 'chasePlease', 'chaseAccount', 'chaseArrived'];
   const clusterProducts = productMix(STORY.clusterSize - 1);
   for (let i = 0; i < STORY.clusterSize - 1; i++) {
     const customer = newCustomer();
-    const owed = refundOwed(customer, clusterProducts[i]!);
-    if (i < 8) chase(customer, owed, chaseKeys[i % chaseKeys.length]!, [5, 12]);
-    const reason = rng.pick(['visa-13.1', 'visa-13.3'] as const);
+    const sent = refundMarkedSent(customer, clusterProducts[i]!);
+    if (i < 8) chase(customer, sent, chaseKeys[i % chaseKeys.length]!, [5, 12]);
+    const reason = rng.pick(['visa-13.6', 'visa-13.3'] as const);
     dispute({
-      order: owed.order,
+      order: sent.order,
       reason,
       expected: 'accept',
-      scenario: `Cluster: ${reason === 'visa-13.1' ? 'item not received' : 'not as described'} after an approved refund was dropped`,
+      scenario: `Cluster: ${reason === 'visa-13.6' ? 'credit not processed' : 'not as described'} after a refund was marked sent but never reached the card`,
       receivedAt: recently(),
     });
   }
@@ -317,9 +345,9 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
   const quietProducts = productMix(STORY.notYetDisputed);
   for (let i = 0; i < STORY.notYetDisputed; i++) {
     const customer = newCustomer();
-    const owed = refundOwed(customer, quietProducts[i]!);
-    if (i < 6) chase(customer, owed, chaseKeys[i % chaseKeys.length]!, [3, 20]);
-    else if (i < 9) chase(customer, owed, i % 2 === 0 ? 'watcherBank' : 'watcherChargeback', [14, 24]);
+    const sent = refundMarkedSent(customer, quietProducts[i]!);
+    if (i < 6) chase(customer, sent, chaseKeys[i % chaseKeys.length]!, [3, 20]);
+    else if (i < 9) chase(customer, sent, i % 2 === 0 ? 'watcherBank' : 'watcherChargeback', [14, 24]);
   }
 
   // -------------------------------------------------------------------------------------------------
@@ -331,10 +359,11 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
     const customer = newCustomer();
     const receivedAt = recently(0.5, 6);
     const order = newOrder(customer, product, purchasedAt ?? quietDay(-26.5, -16), overrides);
-    newCharge(order);
-    return { customer, order, receivedAt };
+    const charge = newCharge(order);
+    return { customer, order, charge, receivedAt };
   };
   const ackAfterDelivery = (order: OrderRow) => plus(order.deliveredAt!, rng.between(0.1, 1));
+  const notShipped = { carrier: null, tracking: null, shipStatus: null, deliveredAt: null, addressMatch: null, signedBy: null, signatureNameMatch: null } as const;
 
   // Item not received (13.1).
   {
@@ -356,7 +385,17 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
     dispute({ order, reason: 'visa-13.1', expected: 'fight', scenario: 'Item not received: bought during an unrelated incident, no causal claim', receivedAt });
   }
   {
-    const { order, receivedAt } = placed(rng.pick(LOW_VALUE), { carrier: null, tracking: null, shipStatus: null, deliveredAt: null, addressMatch: null });
+    // The parcel was lost, and the full price was refunded and settled before the customer disputed.
+    const { order, charge, receivedAt } = placed(rng.pick(LOW_VALUE), { ...notShipped, carrier: CARRIER, tracking: `DPC${rng.digits(10)}`, shipStatus: 'lost' });
+    const requestedAt = plus(order.purchasedAt, rng.between(7, 9));
+    const completedAt = plus(requestedAt, rng.between(0.5, 1.5));
+    newRefund(charge, { status: 'completed', requestedAt, approvedAt: plus(requestedAt, 0.2), completedAt });
+    charge.refundedAt = plus(completedAt, 0.1);
+    charge.amountRefunded = charge.amount;
+    dispute({ order, reason: 'visa-13.1', expected: 'fight', scenario: 'Item not received: lost in transit, but refunded in full before the dispute', receivedAt });
+  }
+  {
+    const { order, receivedAt } = placed(rng.pick(LOW_VALUE), notShipped);
     dispute({ order, reason: 'visa-13.1', expected: 'investigate', scenario: 'Item not received: missing proof of delivery, submit blocked', receivedAt });
   }
   {
@@ -369,15 +408,6 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
     dispute({ order, reason: 'visa-13.1', expected: 'investigate', scenario: 'Item not received: tracking says delivered, customer says it never arrived', receivedAt });
   }
   {
-    const { customer, order, receivedAt } = placed(rng.pick(LOW_VALUE), { addressMatch: false });
-    ticket({ customer, orderId: order.id, summary: 'Delivered to the wrong address', messages: [say('wrongAddress', plus(order.deliveredAt!, rng.between(1, 3)))] });
-    dispute({ order, reason: 'visa-13.1', expected: 'investigate', scenario: 'Item not received: delivered to a different address', receivedAt });
-  }
-  {
-    const { order, receivedAt } = placed(rng.pick(HIGH_VALUE), { signedBy: `${rng.pick(FIRST_NAMES)} ${rng.pick(LAST_NAMES)}`, signatureNameMatch: false });
-    dispute({ order, reason: 'visa-13.1', expected: 'investigate', scenario: 'Item not received: signed for by someone else', receivedAt });
-  }
-  {
     // The order records v2, which was not yet in force when the customer paid.
     const v1Purchase = day(T.policyV2 - rng.between(4, 10));
     const { order, receivedAt } = placed(rng.pick(LOW_VALUE), { termsAcceptedVersion: 'v2' }, v1Purchase);
@@ -386,19 +416,18 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
 
   // Not as described (13.3).
   {
+    // A ticket that only says it arrived proves receipt, not that it was as described (review B2).
     const { customer, order, receivedAt } = placed(rng.pick(PHYSICAL));
     ticket({ customer, orderId: order.id, summary: 'Delivery feedback', messages: [say('arrivedFine', ackAfterDelivery(order))] });
-    dispute({ order, reason: 'visa-13.3', expected: 'fight', scenario: 'Not as described: matches the listing, customer acknowledged it, no complaint', receivedAt });
-  }
-  {
-    const { customer, order, receivedAt } = placed(rng.pick(PHYSICAL));
-    ticket({ customer, orderId: order.id, summary: 'Order received', messages: [say('receivedOrder', ackAfterDelivery(order))] });
-    dispute({ order, reason: 'visa-13.3', expected: 'fight', scenario: 'Not as described: matches the listing, no complaint on record', receivedAt });
+    dispute({ order, reason: 'visa-13.3', expected: 'investigate', scenario: 'Not as described: the customer wrote about the order, so a person reads it before fighting', receivedAt });
   }
   {
     const { order, receivedAt } = placed(rng.pick(PHYSICAL));
+    dispute({ order, reason: 'visa-13.3', expected: 'fight', scenario: 'Not as described: matches the listing, and the customer never contacted us', receivedAt });
+  }
+  {
+    const { order, charge, receivedAt } = placed(rng.pick(PHYSICAL));
     const requestedAt = plus(order.deliveredAt!, rng.between(2, 4));
-    const charge = charges.find((c) => c.orderId === order.id)!;
     // Requested through the returns portal, so there is no ticket; the payout started but has not landed.
     newRefund(charge, { status: 'initiated', requestedAt, approvedAt: plus(requestedAt, 1) });
     dispute({ order, reason: 'visa-13.3', expected: 'investigate', scenario: 'Not as described: refund initiated but not completed', receivedAt });
@@ -409,9 +438,20 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
     ticket({ customer, orderId: order.id, summary: 'Blender stopped working', messages: [say('stoppedWorking', plus(order.deliveredAt!, rng.between(2, 4)))] });
     dispute({ order, reason: 'visa-13.3', expected: 'investigate', scenario: 'Not as described: the customer complained first', receivedAt });
   }
+
+  // Credit not processed (13.6), besides the hero.
   {
-    const { order, receivedAt } = placed(rng.pick(PHYSICAL), { descriptionMatches: false });
-    dispute({ order, reason: 'visa-13.3', expected: 'investigate', scenario: 'Not as described: fulfilment shows it did not match the listing', receivedAt });
+    // Returned after the window: the refund was declined under the policy, so no credit was owed.
+    const { order, charge, receivedAt } = placed(rng.pick(LOW_VALUE));
+    newRefund(charge, { status: 'declined', requestedAt: plus(order.deliveredAt!, rng.between(1, 3)), declineReason: 'Returned without the original packaging' });
+    dispute({ order, reason: 'visa-13.6', expected: 'fight', scenario: 'Credit not processed: the refund was declined under the policy, so none was due', receivedAt });
+  }
+  {
+    // A goodwill credit for part of the price was approved and never paid; the customer disputes it all.
+    const { order, charge, receivedAt } = placed(rng.pick(HIGH_VALUE));
+    const requestedAt = plus(order.deliveredAt!, rng.between(1, 3));
+    newRefund(charge, { status: 'approved', requestedAt, approvedAt: plus(requestedAt, 0.5), amount: minor(Math.round(order.amount / 5)) });
+    dispute({ order, reason: 'visa-13.6', expected: 'investigate', scenario: 'Credit not processed: a partial credit is still owed, so a person decides', receivedAt });
   }
 
   // Charged twice (12.6.1).
@@ -446,6 +486,21 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
     newRefund(extra, { status: 'completed', requestedAt: plus(order.purchasedAt, 0.5), approvedAt: plus(order.purchasedAt, 0.6), completedAt: refundedAt });
     dispute({ order, charge: first, reason: 'visa-12.6.1', expected: 'fight', scenario: 'Charged twice: the duplicate was already refunded', receivedAt: recently() });
   }
+  {
+    // The same item ordered twice, minutes apart: possibly one purchase submitted twice (review B7).
+    const customer = newCustomer();
+    const product = rng.pick(LOW_VALUE);
+    const first = newOrder(customer, product, quietDay(-26.5, -16));
+    newCharge(first);
+    const order = newOrder(customer, product, plus(first.purchasedAt, rng.int(3, 7) / 1440));
+    newCharge(order);
+    dispute({ order, reason: 'visa-12.6.1', expected: 'investigate', scenario: 'Charged twice: two identical orders minutes apart, possibly a duplicate', receivedAt: recently() });
+  }
+  {
+    // There is no second charge at all (review B7).
+    const { order, receivedAt } = placed(rng.pick(LOW_VALUE));
+    dispute({ order, reason: 'visa-12.6.1', expected: 'fight', scenario: 'Charged twice: there is only one charge', receivedAt });
+  }
 
   // Card-not-present fraud (10.4).
   {
@@ -453,20 +508,23 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
     ticket({ customer, orderId: null, summary: 'Gift wrapping', messages: [say('giftWrap', plus(order.purchasedAt, -rng.between(20, 60)))] });
     dispute({ order, reason: 'visa-10.4', expected: 'fight', scenario: 'Fraud: payment authenticated with 3-D Secure', receivedAt });
   }
-  {
-    const { customer, order, receivedAt } = placed(rng.pick(PHYSICAL), { threeDS: 'not-attempted' });
-    // Earlier undisputed orders from the same device, 120 to 365 days before: Compelling Evidence 3.0.
+  /** Earlier orders 130 to 350 days before the dispute, from the same device and account, on the given card. */
+  const history = (customer: CustomerRow, receivedAt: string, card: string) => {
     for (const age of [rng.between(130, 170), rng.between(200, 260), rng.between(290, 350)]) {
-      newCharge(newOrder(customer, rng.pick(PHYSICAL), plus(order.purchasedAt, -age), { ip: `198.51.100.${rng.int(1, 254)}` }));
+      newCharge(newOrder(customer, rng.pick(PHYSICAL), plus(receivedAt, -age), { ip: `198.51.100.${rng.int(1, 254)}`, cardFingerprint: card }));
     }
-    dispute({ order, reason: 'visa-10.4', expected: 'fight', scenario: 'Fraud: no 3-D Secure, but Compelling Evidence 3.0 history', receivedAt });
+  };
+  {
+    // Visa Compelling Evidence 3.0: same card, the right ages, never disputed, same device and account.
+    const { customer, order, receivedAt } = placed(rng.pick(PHYSICAL), { threeDS: 'not-attempted' });
+    history(customer, receivedAt, order.cardFingerprint!);
+    dispute({ order, reason: 'visa-10.4', expected: 'fight', scenario: 'Fraud: no 3-D Secure, but the history qualifies for Compelling Evidence 3.0', receivedAt });
   }
   {
+    // The same person by device and account, but the earlier orders were on another card.
     const { customer, order, receivedAt } = placed(rng.pick(PHYSICAL), { threeDS: 'not-attempted', avs: 'mismatch' });
-    // One old order is not enough, and a recent one is too new to count.
-    newCharge(newOrder(customer, rng.pick(PHYSICAL), plus(order.purchasedAt, -rng.between(180, 250))));
-    newCharge(newOrder(customer, rng.pick(PHYSICAL), plus(order.purchasedAt, -rng.between(30, 60))));
-    dispute({ order, reason: 'visa-10.4', expected: 'investigate', scenario: 'Fraud: no 3-D Secure and not enough history', receivedAt });
+    history(customer, receivedAt, `card_${rng.hex(12)}`);
+    dispute({ order, reason: 'visa-10.4', expected: 'investigate', scenario: 'Fraud: a Compelling Evidence 3.0 candidate that fails only because the card differs', receivedAt });
   }
 
   // Cancelled subscription (13.2).
@@ -487,6 +545,12 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
     dispute({ order, reason: 'visa-13.2', expected: 'fight', scenario: 'Cancelled subscription: cancelled only after the renewal charge', receivedAt: recently() });
   }
 
+  // Another network (review B9).
+  {
+    const { order, receivedAt } = placed(rng.pick(LOW_VALUE), { cardNetwork: 'mastercard' });
+    dispute({ order, reason: 'visa-13.1', expected: 'investigate', scenario: 'Mastercard: not supported yet, so a person reviews it by hand', receivedAt });
+  }
+
   // -------------------------------------------------------------------------------------------------
   // Jira, Confluence and history.
   // -------------------------------------------------------------------------------------------------
@@ -495,7 +559,7 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
     {
       ref: DEMO_REFS.refundDeploy,
       title: 'Deploy refund-worker 3.2',
-      description: 'Moves refund payouts from the inline worker to a batched payout queue.',
+      description: 'Moves refund payouts from the inline worker to a batched payout queue. Refunds are marked completed when queued.',
       at: day(T.refundDeploy),
     },
     {
@@ -515,9 +579,9 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
   const incidents: DemoIncident[] = [
     {
       ref: DEMO_REFS.refundIncident,
-      title: 'Refund worker dropped approved refunds',
+      title: 'Refund worker marked refunds as sent without sending them',
       description:
-        'After refund-worker 3.2, refunds approved by support were marked approved but never sent to the processor. The affected refunds are listed in the incident impact table.',
+        'After refund-worker 3.2, the batched payout queue marked refunds as completed before submitting them, and a queue fault meant they were never sent to the processor. Customers were told their money was on its way. The affected refunds are listed in the incident impact table.',
       effect: 'dropped-refunds',
       windowStart: day(T.refundWindow[0]),
       windowEnd: day(T.refundWindow[1]),
@@ -586,6 +650,7 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
   const disputes: DemoDispute[] = rng.shuffle(pendingDisputes).map((d, i) => {
     const received = Math.floor(Date.parse(d.receivedAt) / 1000);
     const dueBy = Math.floor((nowMs + rng.between(5, 18) * DAY) / 1000);
+    const network: CardNetwork = d.order.cardNetwork;
     return {
       payload: {
         id: `evt_demo_${pad(i + 1)}`,
@@ -603,6 +668,10 @@ export function generateWorld({ seed, now }: GenerateOptions): DemoWorld {
             charge: d.charge.id,
             created: received,
             evidence_details: { due_by: dueBy },
+            payment_method_details: {
+              type: 'card',
+              card: { brand: network, network_reason_code: NETWORK_REASON[network === 'mastercard' ? 'mastercard' : 'visa'][d.reason] },
+            },
             metadata: { order_id: d.order.id, customer: d.order.customerId, purchased_at: d.order.purchasedAt },
           },
         },

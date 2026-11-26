@@ -1,7 +1,7 @@
 // Maps a processor dispute event in a Stripe-compatible JSON shape to Exhibita's dispute record.
 // Pure and defensive: the payload comes from outside, so every field is checked, never trusted.
 
-import { minor, type Dispute } from '../types';
+import { minor, type CardNetwork, type Dispute } from '../types';
 
 export type NormalizeResult =
   | { ok: true; dispute: Dispute }
@@ -14,13 +14,33 @@ const REASON_MAP: Record<string, Dispute['reasonCode']> = {
   duplicate: 'visa-12.6.1',
   fraudulent: 'visa-10.4',
   subscription_canceled: 'visa-13.2',
+  credit_not_processed: 'visa-13.6',
+};
+
+/** Card brand as the processor spells it → our network. Anything else is unknown, never guessed. */
+const NETWORK_MAP: Record<string, CardNetwork> = {
+  visa: 'visa',
+  mastercard: 'mastercard',
+  amex: 'amex',
+  american_express: 'amex',
+  discover: 'discover',
 };
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
 const str = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null);
-const unixToIso = (v: unknown): string | null =>
-  typeof v === 'number' && Number.isFinite(v) ? new Date(v * 1000).toISOString() : null;
+/** Latest instant a JavaScript Date can hold, in seconds. Larger timestamps would throw in toISOString. */
+const MAX_UNIX_SECONDS = 8.64e12;
+
+/**
+ * Unix seconds → ISO 8601. Absent (undefined or null) is null; present but not a usable time is an error,
+ * so a garbled timestamp is rejected as malformed instead of throwing or being silently replaced.
+ */
+function unixField(v: unknown): { ok: true; iso: string | null } | { ok: false } {
+  if (v === undefined || v === null) return { ok: true, iso: null };
+  if (typeof v !== 'number' || !Number.isFinite(v) || Math.abs(v) > MAX_UNIX_SECONDS) return { ok: false };
+  return { ok: true, iso: new Date(v * 1000).toISOString() };
+}
 const isoOrNull = (v: unknown): string | null => {
   const s = str(v);
   if (!s) return null;
@@ -51,6 +71,18 @@ export function normalizeDisputeEvent(payload: unknown, now: () => Date = () => 
   const evidenceDetails = isObj(d.evidence_details) ? d.evidence_details : {};
   const processorReason = str(d.reason) ?? 'general';
 
+  const created = unixField(payload.created);
+  if (!created.ok) return { ok: false, error: 'malformed-dispute', detail: 'created must be a unix time in seconds' };
+  const dueBy = unixField(evidenceDetails.due_by);
+  if (!dueBy.ok) return { ok: false, error: 'malformed-dispute', detail: 'evidence_details.due_by must be a unix time in seconds' };
+
+  // Stripe disputes carry the card brand and the network's own reason code on payment_method_details.card.
+  const pmd = isObj(d.payment_method_details) ? d.payment_method_details : {};
+  const card = isObj(pmd.card) ? pmd.card : {};
+  const brand = (str(card.brand) ?? str(d.network) ?? str(metadata.network))?.toLowerCase().replace(/[\s-]+/g, '_') ?? null;
+  const network: CardNetwork = (brand && NETWORK_MAP[brand]) || 'unknown';
+  const networkReasonCode = str(card.network_reason_code) ?? str(d.network_reason_code);
+
   return {
     ok: true,
     dispute: {
@@ -62,9 +94,11 @@ export function normalizeDisputeEvent(payload: unknown, now: () => Date = () => 
       currency,
       processorReason,
       reasonCode: REASON_MAP[processorReason] ?? 'unknown',
-      respondBy: unixToIso(evidenceDetails.due_by),
-      receivedAt: unixToIso(payload.created) ?? now().toISOString(),
+      respondBy: dueBy.iso,
+      receivedAt: created.iso ?? now().toISOString(),
       purchasedAt: isoOrNull(metadata.purchased_at),
+      network,
+      networkReasonCode,
     },
   };
 }

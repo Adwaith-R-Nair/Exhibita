@@ -1,8 +1,10 @@
 // Reason-code rubrics as data. Rule text is shown verbatim in the UI as "why is this required?",
 // so it is written in plain English for an analyst, not a network rulebook.
 //
-// Codes follow the published Visa and Mastercard dispute categories. Response windows and
-// thresholds vary by processor agreement, so they are configuration, not rubric data.
+// These are Visa rules (review B9). The Mastercard aliases only let a code be recognised; a dispute on a
+// Mastercard, American Express or Discover card is shown as not supported yet rather than judged by Visa
+// rules (see evaluate.ts). Response windows and thresholds vary by processor agreement, so they are
+// configuration, not rubric data.
 
 import type { Reason, ReasonKey, Requirement } from '../types';
 
@@ -52,12 +54,14 @@ export const REASONS: Record<ReasonKey, Reason> = {
         id: 'customer-ack',
         label: 'Customer acknowledged receipt',
         accepts: [{ type: 'customer-message', states: ['acknowledged-receipt'] }],
+        opposes: [{ type: 'customer-message', states: ['denied-receipt'] }],
         required: false,
         rule: 'A message from the customer confirming they received the order is strong supporting evidence.',
       },
       refundStatus('If the customer was promised a refund that never arrived, they are right to dispute and the case should be accepted.'),
       returnPolicy('Shipping and refund policy the customer agreed to'),
     ],
+    creditDefense: true,
   },
 
   'visa-13.3': {
@@ -77,13 +81,16 @@ export const REASONS: Record<ReasonKey, Reason> = {
       {
         id: 'no-prior-complaint',
         label: 'Customer did not raise the problem with us first',
-        accepts: [{ type: 'customer-message', states: ['acknowledged-receipt', 'no-complaint'] }],
+        // Saying the parcel arrived proves receipt, not that it was as described, so it does not count here.
+        accepts: [{ type: 'customer-message', states: ['no-complaint'] }],
+        opposes: [{ type: 'customer-message', states: ['complained', 'requested-refund'] }],
         required: true,
-        rule: 'Issuers expect a customer to try to resolve a quality problem with the merchant before disputing. A complaint we did not resolve weakens the case.',
+        rule: 'Issuers expect a customer to try to resolve a quality problem with the merchant before disputing. A complaint we did not resolve weakens the case. If the customer wrote to us about this order, a person should read what they said.',
       },
-      refundStatus('If a refund was approved but never paid, fighting risks a double refund plus the dispute fee, and the case will likely be lost.'),
+      refundStatus('If a refund was approved but never paid, the customer is owed that money, and fighting risks refunding twice and paying the dispute fee.'),
       returnPolicy('Return policy the customer agreed to'),
     ],
+    creditDefense: true,
   },
 
   'visa-12.6.1': {
@@ -96,15 +103,15 @@ export const REASONS: Record<ReasonKey, Reason> = {
       {
         id: 'distinct-orders',
         label: 'Each charge maps to its own order, or the duplicate was refunded',
-        accepts: [{ type: 'order-pair', states: ['distinct', 'duplicate-refunded'] }],
+        accepts: [{ type: 'order-pair', states: ['distinct', 'duplicate-refunded', 'only-charge'] }],
         concedes: [{ type: 'order-pair', states: ['duplicate'] }],
         required: true,
-        rule: 'A duplicate-charge dispute is defensible only if the two charges are for different orders, or the extra charge was already refunded.',
+        rule: 'A duplicate-charge dispute is defensible if there is no second charge, if the two charges are for different orders, or if the extra charge was already refunded. Two identical orders minutes apart need a person to check.',
       },
       {
         id: 'no-incident',
         label: 'No linked incident caused duplicate charges',
-        accepts: [{ type: 'incident', states: ['none', 'unrelated'] }],
+        accepts: [{ type: 'incident', states: ['none', 'unrelated', 'dropped-refund-repaired'] }],
         concedes: [{ type: 'incident', states: ['caused-duplicate-charge'] }],
         required: true,
         rule: 'If an incident or deploy is linked to duplicate charges for this customer, the customer is right and the dispute should be accepted.',
@@ -127,7 +134,7 @@ export const REASONS: Record<ReasonKey, Reason> = {
           { type: 'prior-orders', states: ['ce30-eligible'] },
         ],
         required: true,
-        rule: 'A 3-D Secure authenticated payment shifts fraud liability to the issuer. Without it, Visa Compelling Evidence 3.0 needs two or more earlier undisputed orders, 120 to 365 days old, sharing the same IP address or device.',
+        rule: 'A 3-D Secure authenticated payment shifts fraud liability to the issuer. Without it, Visa Compelling Evidence 3.0 needs two or more earlier transactions on the same card, 120 to 365 days before the dispute, never disputed or reported as fraud, each sharing at least two of IP address, device, account and shipping address with this order, one of them IP address or device.',
       },
       {
         id: 'avs-match',
@@ -158,11 +165,33 @@ export const REASONS: Record<ReasonKey, Reason> = {
         label: 'Customer had not cancelled before the charge',
         accepts: [{ type: 'cancellation', states: ['none-before-charge'] }],
         concedes: [{ type: 'cancellation', states: ['cancelled-before-charge'] }],
+        opposes: [{ type: 'customer-message', states: ['cancelled'] }],
         required: true,
         rule: 'A recurring charge after the customer cancelled cannot be defended.',
       },
       returnPolicy('Cancellation terms the customer agreed to'),
     ],
+  },
+
+  'visa-13.6': {
+    key: 'visa-13.6',
+    label: 'Credit not processed',
+    code: 'Visa 13.6',
+    aliases: ['mc-4860'],
+    depth: 'deep',
+    requirements: [
+      {
+        id: 'credit-processed',
+        label: 'The promised credit was processed, or none was due',
+        // none and declined-per-policy: no credit was owed.
+        accepts: [{ type: 'refund', states: ['completed-before-dispute', 'none', 'declined-per-policy'] }],
+        concedes: [{ type: 'refund', states: REFUND_OWED }],
+        required: true,
+        rule: 'Show that the refund the customer was promised was paid before they disputed, or that no refund was owed under the policy they accepted. A refund that was approved and never paid means the customer is right.',
+      },
+      returnPolicy('Refund policy the customer accepted at checkout'),
+    ],
+    creditDefense: true,
   },
 };
 
