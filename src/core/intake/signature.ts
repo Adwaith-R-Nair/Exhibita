@@ -11,7 +11,7 @@ export type SignatureCheck = { ok: true } | { ok: false; reason: 'missing-signat
 
 const hmac = (secret: string, t: number, body: string) => createHmac('sha256', secret).update(`${t}.${body}`).digest('hex');
 
-/** Make a signature header, for tests and for the admin's "Send a test dispute". */
+/** Make a signature header, as a sender would. Used by the tests. */
 export function signPayload(body: string, secret: string, nowSeconds: number): string {
   return `t=${nowSeconds},v1=${hmac(secret, nowSeconds, body)}`;
 }

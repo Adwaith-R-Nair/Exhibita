@@ -49,7 +49,7 @@ Findings were checked against the code before being accepted. This page records 
 ### C. Setup and removal robustness
 Save wizard state immediately after every create; a lease lock against two tabs; record partial bulk results; poll the workflow-scheme publish across calls; fix the disputes project key at setup time; refuse to write into existing support, incident or deploy projects the wizard did not create. Removal deletes only work items and rows the wizard recorded (by dispute id and demo row ids), never by an editable label, and checks how the Confluence space is removed.
 
-### D. The story (built in M3)
+### D. The story (the flip is built, D-17; the rest is M3)
 - **Hero becomes a 13.6 case with a real flip.** The refund system says the refund was sent, so the checklist says Fight. Exhibita reconciles the refund ledger against the processor's charge, finds the money never reached the card, traces it to the incident and deploy, and flips to Accept, live, as the refunds source is read.
 - **Accepting is safe.** One confirmed action accepts the cluster, cancels the stuck refunds for those payments (no double payment), queues proactive refunds for the customers who have not disputed, and files the cost bug on the deploy.
 - **Deadlines** come from the processor's due date and set the Jira due date.
