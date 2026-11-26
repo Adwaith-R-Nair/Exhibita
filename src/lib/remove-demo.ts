@@ -3,7 +3,7 @@
 // - demo disputes are found through the app's own dispute ledger, by the demo world's dispute ids;
 // - SQL rows are deleted by the demo world's own ids, never by emptying tables;
 // - projects and the Confluence space are removed only if setup created them.
-// Projects go to the Jira trash, where an admin can restore them for 60 days.
+// Demo projects setup created are deleted outright, so their keys are free for the next set-up.
 
 import api, { route } from '@forge/api';
 import { kvs, WhereConditions } from '@forge/kvs';
@@ -17,7 +17,7 @@ import { getIssueId } from './jira';
 import { readStoredRecord } from './records';
 import { trashSpace } from './confluence';
 import { JiraError } from './jira';
-import { trashProject } from './jira-setup';
+import { deleteDemoProject } from './jira-setup';
 import { clearSeedState, getSeedState, type SeedState } from './seed';
 import { clearLegacyDemoTables, deleteDemoRows, forgetDisputes, ledgerIssues } from './store';
 
@@ -78,7 +78,7 @@ export async function removeDemoStep(): Promise<RemoveProgress> {
 
   // 4. Projects and the space setup created. Demo content in projects setup did not create is limited
   //    to the disputes, handled in step 1.
-  for (const key of state.createdProjects) await trashProject(key);
+  for (const key of state.createdProjects) await deleteDemoProject(key);
   if (state.createdSpace) await trashSpace(state.createdSpace);
 
   // 5. The demo's own SQL rows, by id, and the ledger entries for its disputes.
@@ -126,7 +126,7 @@ async function removeLegacyStep(state: SeedState): Promise<RemoveProgress> {
     }
     if (deleted > 0) return { status: 'running', message: `Deleted ${deleted} demo disputes from the earlier setup` };
   }
-  for (const key of state.createdProjects) await trashProject(key);
+  for (const key of state.createdProjects) await deleteDemoProject(key);
   if (state.createdSpace) await trashSpace(state.createdSpace);
   await clearLegacyDemoTables();
   await clearSources();

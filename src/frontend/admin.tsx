@@ -170,9 +170,9 @@ function DemoData() {
           {confirmRemove ? (
             <SectionMessage appearance="warning" title="Remove all demo data?">
               <Text>
-                Moves the projects setup created to the Jira trash (an admin can restore them for 60 days), removes the demo policy space,
-                deletes the demo disputes and their stored records, and deletes the demo rows from the payment tables. Nothing setup did not
-                create is touched.
+                Permanently deletes the demo projects setup created (they hold only synthetic data), removes the demo policy space, deletes
+                the demo disputes and their stored records, and deletes the demo rows from the payment tables. This cannot be undone. Nothing
+                setup did not create is touched.
               </Text>
               <Inline space="space.100">
                 <Button appearance="danger" onClick={remove}>

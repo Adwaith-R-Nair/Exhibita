@@ -128,11 +128,15 @@ export async function ensureSoftwareProject(key: string, name: string, descripti
   return { project: await createProject(key, name, description, 'software', SOFTWARE_PROJECT_TEMPLATES, as), created: true };
 }
 
-/** Move a project to the Jira trash. Recoverable by an admin for 60 days. */
-export async function trashProject(key: string, as: Requester = api.asUser()): Promise<boolean> {
-  const res = await as.requestJira(route`/rest/api/3/project/${key}?enableUndo=true`, { method: 'DELETE' });
+/**
+ * Permanently delete a project setup created. Only ever called for demo projects that hold synthetic data
+ * the wizard generated. Not the trash: a trashed project keeps its key and name for 60 days, so every
+ * remove and set-up cycle would drift to SUP2, SUP3 and so on (found live, 27 Nov).
+ */
+export async function deleteDemoProject(key: string, as: Requester = api.asUser()): Promise<boolean> {
+  const res = await as.requestJira(route`/rest/api/3/project/${key}?enableUndo=false`, { method: 'DELETE' });
   if (res.status === 404) return false;
-  if (!res.ok) throw new JiraError(`Moving ${key} to the trash`, res.status, await res.text());
+  if (!res.ok) throw new JiraError(`Deleting demo project ${key}`, res.status, await res.text());
   return true;
 }
 
