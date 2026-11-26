@@ -8,7 +8,8 @@ Exhibita is a single Forge app. Its decisions come from deterministic, unit-test
           ▼
  ┌─────────────────┐   queue    ┌──────────────────┐
  │ webtrigger       │──────────▶│ intake consumer   │──▶ JSM Dispute work item
- │ (secret check,   │           │ (create issue,    │    + issue property "exhibita"
+ │ (secret check,   │           │ (create issue,    │    + stored record (app storage)
+ │                  │           │                   │      mirrored to issue property
  │  fast 202 reply) │           │  keep raw payload)│
  └─────────────────┘           └──────────────────┘
                                          │
@@ -28,7 +29,7 @@ Exhibita is a single Forge app. Its decisions come from deterministic, unit-test
 ## 1. Principles
 
 1. **Deterministic core, AI on top.** Forge backends cannot call a Rovo agent and read its answer. Rovo is involved in exactly three ways: Jira Automation's "Use Rovo agent" step, the user chatting with the agent, and `rovo.open()` from the UI, which opens chat with a prefilled prompt. So every decision lives in tested code.
-2. **One source of truth per dispute.** The dispute record and its evidence live in a Jira issue property, `exhibita`. The panel, the validator, the agent actions and the MCP tools all read the same record. Orders, customers, outcomes and the audit log live in Forge SQL. Configuration lives in Forge KVS.
+2. **One source of truth per dispute.** The dispute record and its evidence live in Forge app storage under `record:{issueId}`, which only the app can write (D-11). A mirror in the issue property `exhibita` serves JQL and display, but is never trusted alone, because anyone who can edit the work item can rewrite it. The panel, the validator, the agent actions and the MCP tools all read the stored copy and flag a mirror that differs. Orders, customers, outcomes and the audit log live in Forge SQL. Configuration lives in Forge KVS.
 3. **Agent tools are read-only.** Actions use `actionVerb: GET`, return well under 1 MB and finish in under 15 seconds. Jira Automation only runs GET actions. Anything that changes state is a panel button with human confirmation.
 4. **Long work runs on queues.** Seeding, clustering and pack building run as async events (up to 900 s). Progress streams to the UI over Forge Realtime, and checkpoints are saved so a page reload recovers.
 5. **Graceful degradation.** No dependency on Teamwork Graph, Rovo or Assets is allowed to break the core flow.
@@ -53,7 +54,7 @@ Forge function keys must be 23 characters or fewer, so handler keys are kept sho
 
 ## 3. Data model
 
-**Dispute record** (issue property `exhibita`):
+**Dispute record** (stored in app storage as `record:{issueId}`, mirrored to the issue property `exhibita`):
 
 ```json
 {

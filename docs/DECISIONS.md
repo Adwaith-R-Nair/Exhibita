@@ -56,3 +56,10 @@ Each decision has an ID that commit subjects reference, for example `(D-04)`. A 
 **Date:** 26 Nov 2026
 **Context:** Building one layer at a time would leave the main story (webhook to verdict flip to cluster) unproven until late.
 **Decision:** After the platform spikes, build a thin vertical slice of the full story first, then widen each part. Every milestone leaves a working demo.
+
+## D-11: Exhibita's own storage holds the authoritative dispute record
+**Date:** 26 Nov 2026
+**Supersedes:** the storage part of D-04.
+**Context:** Spike S8 showed that anyone who can edit a work item can rewrite its issue properties through the REST API. Evidence typed into the property by hand passed the submit gate.
+**Decision:** The record is stored in Forge app storage under `record:{issueId}`, which only the app can write, and mirrored to the issue property `exhibita` for JQL and display. The panel, the validator and the agent actions read the stored copy only. If the mirror differs from it, the panel and agent say so. If only a mirror exists, nothing is evaluated and submission is blocked. A redelivered webhook restores a missing stored record from the authenticated payload, with evidence collected again.
+**Consequence:** Evidence can only enter a record through Exhibita's own code paths. Each read costs one extra storage call, and records are keyed by issue id so they survive a project move.
