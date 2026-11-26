@@ -7,7 +7,7 @@ At the end of M2 the app was reviewed five ways, each without seeing the others'
 
 Findings were checked against the code before being accepted. This page records what was found and what we decided. Progress is tracked in [BUILD_LOG.md](../BUILD_LOG.md).
 
-**Status (27 Nov 2026):** sections A, B and C and the core of D are fixed and verified live (commits `881b67d`, `6b3fb72`, `bd4a0bc`, `c2310b6`; decisions D-15 to D-18). The rest of D (safe bulk accept, proactive refunds, cost bug) is M3 work. The deferred items below remain deferred.
+**Status (27 Nov 2026):** sections A, B and C and the core of D are fixed and verified live (commits `5a97064`, `5783af0`, `8d7605d`, `1e9f426`; decisions D-15 to D-18). The rest of D (safe bulk accept, proactive refunds, cost bug) is M3 work. The deferred items below remain deferred.
 
 ## What everyone agreed on
 

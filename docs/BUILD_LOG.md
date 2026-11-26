@@ -5,7 +5,7 @@ This is the engineering log for Exhibita, a Forge app for Jira Service Managemen
 **How to read it.**
 - "At a glance" lists every bug, breakage and blocker so far in one table, then the milestones reached.
 - The chronology that follows is newest first. Each entry is split into Built, Broke, Fixed, Blocked and Learned where those apply.
-- Short hashes such as `48a7d9f` are commits in this repository. Decision IDs such as D-11 point to [DECISIONS.md](DECISIONS.md); spike IDs such as S8 point to [SPIKES.md](SPIKES.md); milestones such as M2 point to [ROADMAP.md](ROADMAP.md).
+- Short hashes such as `efbf8a7` are commits in this repository. Decision IDs such as D-11 point to [DECISIONS.md](DECISIONS.md); spike IDs such as S8 point to [SPIKES.md](SPIKES.md); milestones such as M2 point to [ROADMAP.md](ROADMAP.md).
 - All data is synthetic. Work item keys (DSP-47, INC-1, REF-1001) are the ones the development site assigned.
 - Git records every commit so far with the date 26 Nov 2026. Entries marked "overnight" ran past midnight into 27 Nov.
 
@@ -17,52 +17,52 @@ This is the engineering log for Exhibita, a Forge app for Jira Service Managemen
 
 | # | What broke | Root cause | Fix | Commit(s) | How it was found |
 |---|---|---|---|---|---|
-| 1 | First `forge deploy` failed: "TypeScript emitted no output" | ts-loader emits nothing when `tsconfig.json` sets `noEmit` | Removed `noEmit` from tsconfig; the `typecheck` script still passes `--noEmit` | `a298655` | Live deploy |
-| 2 | Second deploy failed: "Can't resolve './intake/consumer.js'" | Forge's webpack config does not map `.js` import paths to `.ts` files | Relative imports made extensionless | `a298655` | Live deploy |
-| 3 | Setup page stuck on a loading skeleton; "Failed to open iframe bridge: Handshake timeout" | The local DNS resolver answered `REFUSED` for Forge's CDN hosts (`*.cdn.prod.atlassian-dev.net`) | Machine and browser switched to public DNS (environment fix, no code change) | recorded in `6bde355` | Live run |
-| 4 | Platform check failed: disputes project DSP missing | No project had been created yet | Setup page can create the disputes project | `ef2b4a3` | Live platform check |
-| 5 | Teamwork Graph rejected the check query: "You must set an operation name of the shape [company]_[operation]" | The API requires named operations | Query named `exhibita_platformCheck` | `ef2b4a3` | Live platform check |
-| 6 | Disputes were created as Epics | Intake took the first work type the project listed | `chooseWorkType` skips epics and subtasks and prefers Dispute, Service request or Task (5 tests) | `857f8ae` | Live run |
-| 7 | A redelivered webhook created a duplicate work item | JQL cannot search an issue property until a `jira:entityProperty` module indexes it | Indexed the dispute id, plus a KVS read-your-writes marker checked before JQL | `857f8ae` | Live run |
-| 8 | Issue panel missing on work items (first cause) | The admin was not in the project's agent role; JSM hides app panels from non-agents | Setup adds the admin to Administrators and Service Desk Team | `ef2b4a3` | Live run |
-| 9 | Issue panel still missing (second cause) | The REST-created service project was a shell (Epic and Story only, no service desk), from template `simplified-general-service-desk` | Deleted with the site owner's approval and recreated from Jira's UI; later, the correct REST template key was found | `bc9742c`, `f092833`, `b8e026d` | Live run |
-| 10 | A resent dispute was skipped and never came back | A stale KVS intake marker pointed at a work item that had been deleted | Consumer checks that the recorded work item still exists before trusting the marker | `3f99cc5` | Live run |
-| 11 | `workflows/create` rejected the payload: "The reference new is not a UUID" | Status references in the request must be UUIDs | Status references sent as UUIDs | recorded in `6b1de68` | Live REST call |
-| 12 | Publishing the workflow scheme draft failed: "missing the mappings required for statuses with IDs 1,3,4,5,6" | Jira demands status mappings even when no work items of the type exist | Status mappings supplied on publish | recorded in `6b1de68` | Live REST call |
-| 13 | The submit gate could be passed with hand-typed evidence | Issue properties are writable by anyone who can edit the work item | Authoritative record moved to Forge app storage; issue property is only a mirror (D-11) | `48a7d9f`, `e5b3031` | Live test of the gate (S8) |
-| 14 | Confluence calls failed for the app | The app had no Confluence scopes and was not installed in Confluence | Added scopes (major version 3.0.0), approved the major version rule, upgraded installs | `f092833` | Live spike (S12) |
-| 15 | Policy effective dates could not come from Confluence versions | Confluence version timestamps are always the time of writing | Effective dates stored in a page property (D-14) | `b8e026d` | Live spike (S12) |
-| 16 | The story's planned keys (INC-231, DEP-88) could not be created | Jira assigns issue keys; they cannot be chosen | Story uses site-assigned keys such as INC-1 and DEP-n (D-14) | `b8e026d` | Live spike |
-| 17 | TypeScript compile error in the setup library | `asApp()` and `asUser()` requester types differ | Wrappers narrowed to a `requestJira`-only type | `473c415` | Typecheck |
-| 18 | Five mismatches between the live evidence fetcher and the reference observer (see M2 entry) | Window anchored on the wrong charge, unsorted lists, a comment header leaking into classified text, links via the first ticket only, wrong ticket key on refunds | Each fixed before going live; ticket header stripping is round-trip tested | `71b9d30` | Comparing fetcher with reference observer |
-| 19 | "Remove demo data" would have cleaned only the first 20 stored records before trashing the project | A single page of app storage was read | Paged sweep of app storage | `473c415` | Reading the code before running it |
+| 1 | First `forge deploy` failed: "TypeScript emitted no output" | ts-loader emits nothing when `tsconfig.json` sets `noEmit` | Removed `noEmit` from tsconfig; the `typecheck` script still passes `--noEmit` | `887731d` | Live deploy |
+| 2 | Second deploy failed: "Can't resolve './intake/consumer.js'" | Forge's webpack config does not map `.js` import paths to `.ts` files | Relative imports made extensionless | `887731d` | Live deploy |
+| 3 | Setup page stuck on a loading skeleton; "Failed to open iframe bridge: Handshake timeout" | The local DNS resolver answered `REFUSED` for Forge's CDN hosts (`*.cdn.prod.atlassian-dev.net`) | Machine and browser switched to public DNS (environment fix, no code change) | recorded in `db6cd7c` | Live run |
+| 4 | Platform check failed: disputes project DSP missing | No project had been created yet | Setup page can create the disputes project | `99a49de` | Live platform check |
+| 5 | Teamwork Graph rejected the check query: "You must set an operation name of the shape [company]_[operation]" | The API requires named operations | Query named `exhibita_platformCheck` | `99a49de` | Live platform check |
+| 6 | Disputes were created as Epics | Intake took the first work type the project listed | `chooseWorkType` skips epics and subtasks and prefers Dispute, Service request or Task (5 tests) | `54cbca9` | Live run |
+| 7 | A redelivered webhook created a duplicate work item | JQL cannot search an issue property until a `jira:entityProperty` module indexes it | Indexed the dispute id, plus a KVS read-your-writes marker checked before JQL | `54cbca9` | Live run |
+| 8 | Issue panel missing on work items (first cause) | The admin was not in the project's agent role; JSM hides app panels from non-agents | Setup adds the admin to Administrators and Service Desk Team | `99a49de` | Live run |
+| 9 | Issue panel still missing (second cause) | The REST-created service project was a shell (Epic and Story only, no service desk), from template `simplified-general-service-desk` | Deleted with the site owner's approval and recreated from Jira's UI; later, the correct REST template key was found | `49cc631`, `1e1a595`, `d2f9d29` | Live run |
+| 10 | A resent dispute was skipped and never came back | A stale KVS intake marker pointed at a work item that had been deleted | Consumer checks that the recorded work item still exists before trusting the marker | `8cf4549` | Live run |
+| 11 | `workflows/create` rejected the payload: "The reference new is not a UUID" | Status references in the request must be UUIDs | Status references sent as UUIDs | recorded in `5d75d7e` | Live REST call |
+| 12 | Publishing the workflow scheme draft failed: "missing the mappings required for statuses with IDs 1,3,4,5,6" | Jira demands status mappings even when no work items of the type exist | Status mappings supplied on publish | recorded in `5d75d7e` | Live REST call |
+| 13 | The submit gate could be passed with hand-typed evidence | Issue properties are writable by anyone who can edit the work item | Authoritative record moved to Forge app storage; issue property is only a mirror (D-11) | `efbf8a7`, `caaf650` | Live test of the gate (S8) |
+| 14 | Confluence calls failed for the app | The app had no Confluence scopes and was not installed in Confluence | Added scopes (major version 3.0.0), approved the major version rule, upgraded installs | `1e1a595` | Live spike (S12) |
+| 15 | Policy effective dates could not come from Confluence versions | Confluence version timestamps are always the time of writing | Effective dates stored in a page property (D-14) | `d2f9d29` | Live spike (S12) |
+| 16 | The story's planned keys (INC-231, DEP-88) could not be created | Jira assigns issue keys; they cannot be chosen | Story uses site-assigned keys such as INC-1 and DEP-n (D-14) | `d2f9d29` | Live spike |
+| 17 | TypeScript compile error in the setup library | `asApp()` and `asUser()` requester types differ | Wrappers narrowed to a `requestJira`-only type | `40753a9` | Typecheck |
+| 18 | Five mismatches between the live evidence fetcher and the reference observer (see M2 entry) | Window anchored on the wrong charge, unsorted lists, a comment header leaking into classified text, links via the first ticket only, wrong ticket key on refunds | Each fixed before going live; ticket header stripping is round-trip tested | `5592f92` | Comparing fetcher with reference observer |
+| 19 | "Remove demo data" would have cleaned only the first 20 stored records before trashing the project | A single page of app storage was read | Paged sweep of app storage | `40753a9` | Reading the code before running it |
 | 20 | `forge logs` showed too little to count results | It prints 20 lines by default | Counts checked with JQL, later with `--limit` | none | Live run |
-| 21 | Explanations read wrongly: a conceded non-refund item said "Evidence cancelled before the charge"; a check with only evidence against us was called a conflict; a dropped-refund incident was titled "charge problem"; policy exhibits showed a page id | Explanation text did not distinguish these cases | Tests written first, then the wording fixed | `90a3607` | Reading the panel's explanations |
-| 22 | An unread source would have looked empty (an unread refunds table becomes "no refund owed") | Collectors could not tell "not read yet" from "read and empty" | Collectors take a list of pending sources and emit nothing from them | `c4f5998` | Design review before shipping |
-| 23 | `app.rovo` metadata required for `rovo:mcp` from 5 Jan 2027 is rejected by `@forge/manifest` 13.9.1 | Schema lags the documentation | **Open.** Left out with a comment; re-check before submission | `885b427`, `34f62b8` | Documentation check |
-| 24 | New apps need a Developer Space, which the CLI cannot create | Platform limitation | Created once in the developer console | `1298048` | Documentation check |
-| 25 | Review round 1 findings (see that entry) | Various | Fixed, except items deliberately deferred (dispute stages, other networks) | `881b67d`, `6b3fb72`, `bd4a0bc`, `c2310b6` | Internal and external review |
-| 26 | `Causes` links were stored backwards: INC-1 read "causes DEP-1", and support tickets appeared to cause the incident | Jira's issue-link create call reads opposite to its field names (the `inwardIssue` performs the outward verb) | Links written with the cause as `inwardIssue`; readers follow only "is caused by" | `6b3fb72` | Reading a live incident's links while fixing review items |
-| 27 | Setting up demo data again after removing it failed: "Project 'Customer support' uses this project key" | Projects in the Jira trash keep their keys and names | Setup picks the next free key (SUP2, INC2, DEP2) and records its choice | `c2310b6` | Live run (remove, then set up again) |
-| 28 | The demo made before the review could not be removed by the new removal code | It predated the dispute ledger and was generated by an older generator | A narrow legacy path: deletes only work items that carry the demo label and whose app-stored record names a demo dispute id | `c2310b6` | Live run |
+| 21 | Explanations read wrongly: a conceded non-refund item said "Evidence cancelled before the charge"; a check with only evidence against us was called a conflict; a dropped-refund incident was titled "charge problem"; policy exhibits showed a page id | Explanation text did not distinguish these cases | Tests written first, then the wording fixed | `c5bb4ec` | Reading the panel's explanations |
+| 22 | An unread source would have looked empty (an unread refunds table becomes "no refund owed") | Collectors could not tell "not read yet" from "read and empty" | Collectors take a list of pending sources and emit nothing from them | `a6727b9` | Design review before shipping |
+| 23 | `app.rovo` metadata required for `rovo:mcp` from 5 Jan 2027 is rejected by `@forge/manifest` 13.9.1 | Schema lags the documentation | **Open.** Left out with a comment; re-check before submission | `b52e221`, `a698c2d` | Documentation check |
+| 24 | New apps need a Developer Space, which the CLI cannot create | Platform limitation | Created once in the developer console | `1fb3d02` | Documentation check |
+| 25 | Review round 1 findings (see that entry) | Various | Fixed, except items deliberately deferred (dispute stages, other networks) | `5a97064`, `5783af0`, `8d7605d`, `1e9f426` | Internal and external review |
+| 26 | `Causes` links were stored backwards: INC-1 read "causes DEP-1", and support tickets appeared to cause the incident | Jira's issue-link create call reads opposite to its field names (the `inwardIssue` performs the outward verb) | Links written with the cause as `inwardIssue`; readers follow only "is caused by" | `5783af0` | Reading a live incident's links while fixing review items |
+| 27 | Setting up demo data again after removing it failed: "Project 'Customer support' uses this project key" | Projects in the Jira trash keep their keys and names | Setup picks the next free key (SUP2, INC2, DEP2) and records its choice | `1e9f426` | Live run (remove, then set up again) |
+| 28 | The demo made before the review could not be removed by the new removal code | It predated the dispute ledger and was generated by an older generator | A narrow legacy path: deletes only work items that carry the demo label and whose app-stored record names a demo dispute id | `1e9f426` | Live run |
 
 ### Milestones reached
 
 | Milestone | Reached | Evidence |
 |---|---|---|
-| Docs-first repo: spec, architecture, D-01 to D-10, invariants, roadmap | 26 Nov | `0ebcdce`, `ca28e80`, `d40ec19` |
-| 15 platform facts checked against the Forge docs | 26 Nov | `d634b7e`, SPIKES part 1 |
-| Deterministic core: rubrics for five reasons, normaliser, lexicon, 66 tests | 26 Nov | `a8e9246` to `f442bc9` |
-| First deploy and install on the development site | 26 Nov (evening) | `1298048`, `a298655` |
+| Docs-first repo: spec, architecture, D-01 to D-10, invariants, roadmap | 26 Nov | `0ebcdce`, `bf9861c`, `8901e92` |
+| 15 platform facts checked against the Forge docs | 26 Nov | `0ed1847`, SPIKES part 1 |
+| Deterministic core: rubrics for five reasons, normaliser, lexicon, 66 tests | 26 Nov | `7022e40` to `7a506ff` |
+| First deploy and install on the development site | 26 Nov (evening) | `1fb3d02`, `887731d` |
 | M1 slice live: webhook to work item to panel | 26 Nov (evening) | S4, S5 |
-| Submit gate live on the dispute workflow, then hardened (D-11) | 26 Nov (night) | S8, `48a7d9f` |
-| Demo world built on the site by the 11-step wizard: 60 disputes, 29 tickets, 3 incidents, 3 deploys | overnight | `473c415` |
-| Hero dispute (DSP-47) shows Accept with cited sources | overnight | `71b9d30` |
-| 60 of 60 demo disputes reach their intended recommendation live; validation suite 10/10 live | overnight | `0e81677` |
-| Live evidence arrival in the panel (S10) | overnight | `c4f5998` |
+| Submit gate live on the dispute workflow, then hardened (D-11) | 26 Nov (night) | S8, `efbf8a7` |
+| Demo world built on the site by the 11-step wizard: 60 disputes, 29 tickets, 3 incidents, 3 deploys | overnight | `40753a9` |
+| Hero dispute (DSP-47) shows Accept with cited sources | overnight | `5592f92` |
+| 60 of 60 demo disputes reach their intended recommendation live; validation suite 10/10 live | overnight | `fee1af5` |
+| Live evidence arrival in the panel (S10) | overnight | `a6727b9` |
 | Live spikes: 9 of 13 pass (S1 to S5, S8, S10 to S12); S6, S7, S9, S13 pending | overnight | SPIKES part 2 |
-| 224 unit and validation tests passing | overnight (`c4f5998`) | `npm test` |
-| Review round 1 fixed and verified live: 63 of 63 demo disputes as intended, validation 10/10, all 8 platform checks, the hero flips Fight to Accept, signed webhooks enforced | 27 Nov | `881b67d` to `c2310b6` |
+| 224 unit and validation tests passing | overnight (`a6727b9`) | `npm test` |
+| Review round 1 fixed and verified live: 63 of 63 demo disputes as intended, validation 10/10, all 8 platform checks, the hero flips Fight to Accept, signed webhooks enforced | 27 Nov | `5a97064` to `1e9f426` |
 | 364 unit and validation tests passing | 27 Nov | `npm test` |
 
 ---
@@ -82,7 +82,7 @@ This is the engineering log for Exhibita, a Forge app for Jira Service Managemen
 - The old demo could not be removed by the new removal code (row 28).
 
 ### Fixed
-Every review item below except the two deliberately deferred. Core decision fixes in `881b67d` (each with a failing test first), the gate, permission and intake fixes in `6b3fb72`, signed webhooks in `bd4a0bc`, setup and removal in `c2310b6`.
+Every review item below except the two deliberately deferred. Core decision fixes in `5a97064` (each with a failing test first), the gate, permission and intake fixes in `5783af0`, signed webhooks in `8d7605d`, setup and removal in `1e9f426`.
 
 ### Verified live
 - Remove demo data (legacy path) cleared the earlier demo; a fresh setup ran all 11 steps, choosing SUP2, INC2 and DEP2 because the earlier projects are in the trash.
@@ -102,7 +102,7 @@ With M2 working live, the build paused for review before widening further. Five 
 Each finding was verified by reading or running the code before being listed. The triage and decisions are in [reviews/round-1.md](reviews/round-1.md). **All are fixed** (see "Review round 1 fixes" above) **except** dispute stages and arbitration fees, and networks other than Visa, which are deliberately deferred (D-18).
 
 ### Critical
-1. **A partly collected record is evaluated as complete.** Collection saves the record after each source with `collectedAt` still null, but evaluation does not check for that. The submit check could pass while later sources (refunds, incidents) are unread or have failed. This is the same class of risk that `c4f5998` closed for collectors, one layer up.
+1. **A partly collected record is evaluated as complete.** Collection saves the record after each source with `collectedAt` still null, but evaluation does not check for that. The submit check could pass while later sources (refunds, incidents) are unread or have failed. This is the same class of risk that `a6727b9` closed for collectors, one layer up.
 2. **The lexicon misreads denials of receipt.** "It has not yet arrived" was read as acknowledged receipt, and common denials ("never delivered", "did not arrive", "still haven't gotten it") were missed.
 3. **A "no complaint" inference could satisfy a required item for 13.3 (not as described).** A complaint the lexicon missed therefore became a Fight.
 
@@ -145,7 +145,7 @@ Each finding was verified by reading or running the code before being listed. Th
 ## Polish (overnight)
 
 ### Built
-- **Live evidence arrival** (`c4f5998`, spike S10). Collection now reads one source at a time (order, support tickets, refunds, incidents, policies), saves the record and publishes a Realtime event on `exhibita-evidence` after each. The open panel shows "Collecting evidence" with the source just read, then refreshes. Seen live on DSP-47 from "Collect evidence again"; the intake consumer runs the same code and logged no publish failures across the 60-dispute demo run.
+- **Live evidence arrival** (`a6727b9`, spike S10). Collection now reads one source at a time (order, support tickets, refunds, incidents, policies), saves the record and publishes a Realtime event on `exhibita-evidence` after each. The open panel shows "Collecting evidence" with the source just read, then refreshes. Seen live on DSP-47 from "Collect evidence again"; the intake consumer runs the same code and logged no publish failures across the 60-dispute demo run.
 
 ### Broke
 - Explanation wording, found by reading the panel's explanations:
@@ -155,8 +155,8 @@ Each finding was verified by reading or running the code before being listed. Th
   - Policy exhibits were named by Confluence page id.
 
 ### Fixed
-- `90a3607`: concessions now read as sentences ("The customer cancelled before the charge"), failed checks say the evidence is against us, the dropped-refund incident is titled that way, and policy exhibits use the page title. The new explanation tests failed before the change.
-- `c4f5998`: a design risk caught before shipping. Reading sources one at a time means a record exists while some sources are unread, and an unread refunds table would look like "no refund owed", which could wrongly support a Fight. Collectors now take a list of pending sources and emit nothing from them. The new collector tests failed before the change.
+- `c5bb4ec`: concessions now read as sentences ("The customer cancelled before the charge"), failed checks say the evidence is against us, the dropped-refund incident is titled that way, and policy exhibits use the page title. The new explanation tests failed before the change.
+- `a6727b9`: a design risk caught before shipping. Reading sources one at a time means a record exists while some sources are unread, and an unread refunds table would look like "no refund owed", which could wrongly support a Fight. Collectors now take a list of pending sources and emit nothing from them. The new collector tests failed before the change.
 
 ### Learned
 - Any staged or partial read needs an explicit "not read yet" state, separate from "read and empty". (Review round 1 found the same gap one layer up, in evaluation.)
@@ -165,28 +165,28 @@ Each finding was verified by reading or running the code before being listed. Th
 
 ## M2 build: evidence, demo world and setup wizard (overnight)
 
-Commits `73ed779` to `0e81677`.
+Commits `e1222be` to `fee1af5`.
 
 ### Built
-- **Source-record contract** (`73ed779`). One definition shared by the demo generator, the setup wizard and the collectors: the SQL rows, the Jira and Confluence records the wizard creates, and the observed records the collectors read back with real keys. An incident is a cause only through an explicit impact row or link, never through timing.
-- **Evidence collectors with provenance** (`6c88a0f`). Orders, charges, refunds, tickets, incidents and policy versions become lettered evidence. Every item names its source and the time of the underlying fact; inferences from customer text carry the quoted phrase; an absence is evidence only when it is a recorded query result.
-- **Seeded demo-world generator** (`1662541`) with a reference observer and a story test. The world has 60 disputes, including the $249 hero whose approved refund was dropped by an incident, a cluster of 38 disputes (the hero plus 37) totalling $5,492, and 212 customers not yet disputed who are owed $30,859. The story test checks every dispute's recommendation, the cluster and the blast radius on six seeds and asserts the dollar totals are identical across them; a one-off 300-seed sweep also held.
-- **Verdict after challenge gates submission** (`ff498bc`, D-12). The panel, validator and agent actions share one verdict: every required item met and a final recommendation of Fight. The new test covers a complete case where the customer says the parcel never arrived, which the checklist alone would have let through.
-- **SQL schema** (`f071bac`, D-03): customers, products, orders, charges, refunds, incident_impacts and outcomes. Row codecs live in the pure core with round-trip tests, so false and unknown stay distinct and times stay UTC. Inserts are batched `INSERT IGNORE`, so a seeding step can be re-run after a partial failure.
-- **Evidence gathering on intake** (`71b9d30`). Orders and refunds from Forge SQL, tickets and linked incidents from Jira, the policy version in force from Confluence. The panel shows lettered exhibits with sources, Fact and Inference labels, the case against us, whether the challenge changed the recommendation, and "Collect evidence again".
-- **Jira and Confluence setup library and the setup wizard** (`473c415`, D-13). "Set up demo data" runs 11 resumable find-or-create steps from the admin's browser, one bounded resolver call at a time, with progress saved after each: projects, the Dispute work type, the dispute workflow with the submit check, policy pages, deploys and incidents with their causal links, support tickets, payment records, and 60 disputes pushed through the real webhook queue. "Remove demo data" removes only what setup recorded creating and moves projects and the space to the trash. The page also runs the ten-case validation suite.
-- **"Check the demo disputes"** (`0e81677`). Evaluates every demo dispute on the site from its stored record and live sources, and compares each verdict with what the generator intended. It catches drift between the reference observer and what the site returns.
-- **Decision records** (`b8e026d`): D-12, D-13 and D-14.
+- **Source-record contract** (`e1222be`). One definition shared by the demo generator, the setup wizard and the collectors: the SQL rows, the Jira and Confluence records the wizard creates, and the observed records the collectors read back with real keys. An incident is a cause only through an explicit impact row or link, never through timing.
+- **Evidence collectors with provenance** (`4a130d8`). Orders, charges, refunds, tickets, incidents and policy versions become lettered evidence. Every item names its source and the time of the underlying fact; inferences from customer text carry the quoted phrase; an absence is evidence only when it is a recorded query result.
+- **Seeded demo-world generator** (`3798652`) with a reference observer and a story test. The world has 60 disputes, including the $249 hero whose approved refund was dropped by an incident, a cluster of 38 disputes (the hero plus 37) totalling $5,492, and 212 customers not yet disputed who are owed $30,859. The story test checks every dispute's recommendation, the cluster and the blast radius on six seeds and asserts the dollar totals are identical across them; a one-off 300-seed sweep also held.
+- **Verdict after challenge gates submission** (`3ca49b6`, D-12). The panel, validator and agent actions share one verdict: every required item met and a final recommendation of Fight. The new test covers a complete case where the customer says the parcel never arrived, which the checklist alone would have let through.
+- **SQL schema** (`50b698c`, D-03): customers, products, orders, charges, refunds, incident_impacts and outcomes. Row codecs live in the pure core with round-trip tests, so false and unknown stay distinct and times stay UTC. Inserts are batched `INSERT IGNORE`, so a seeding step can be re-run after a partial failure.
+- **Evidence gathering on intake** (`5592f92`). Orders and refunds from Forge SQL, tickets and linked incidents from Jira, the policy version in force from Confluence. The panel shows lettered exhibits with sources, Fact and Inference labels, the case against us, whether the challenge changed the recommendation, and "Collect evidence again".
+- **Jira and Confluence setup library and the setup wizard** (`40753a9`, D-13). "Set up demo data" runs 11 resumable find-or-create steps from the admin's browser, one bounded resolver call at a time, with progress saved after each: projects, the Dispute work type, the dispute workflow with the submit check, policy pages, deploys and incidents with their causal links, support tickets, payment records, and 60 disputes pushed through the real webhook queue. "Remove demo data" removes only what setup recorded creating and moves projects and the space to the trash. The page also runs the ten-case validation suite.
+- **"Check the demo disputes"** (`fee1af5`). Evaluates every demo dispute on the site from its stored record and live sources, and compares each verdict with what the generator intended. It catches drift between the reference observer and what the site returns.
+- **Decision records** (`d2f9d29`): D-12, D-13 and D-14.
 
 ### Broke
-- **Typecheck.** `asApp()` and `asUser()` return requester types that differ, so a wrapper accepting either did not compile. Wrappers were narrowed to a type with only `requestJira` (`473c415`).
-- **Fetcher versus reference observer.** Before going live, the live fetcher's output was compared with what the reference observer says the collectors should see. Five mismatches, all fixed in `71b9d30`:
+- **Typecheck.** `asApp()` and `asUser()` return requester types that differ, so a wrapper accepting either did not compile. Wrappers were narrowed to a type with only `requestJira` (`40753a9`).
+- **Fetcher versus reference observer.** Before going live, the live fetcher's output was compared with what the reference observer says the collectors should see. Five mismatches, all fixed in `5592f92`:
   1. The duplicate-charge window was anchored on the purchase instead of the disputed charge.
   2. Refunds, tickets and incidents were not sorted.
   3. A "Customer (time):" header on ticket comments leaked into the text being classified. It is now stripped, with a round-trip test.
   4. Refund to incident links were followed only through the first ticket.
   5. A refund's ticket key was set by the last ticket instead of the first.
-- **Removal bug, caught by reading the code before running it.** When setup had created the disputes project, only the first 20 stored records would have been cleaned before the project was trashed, leaving orphaned records in app storage. Replaced with a paged sweep (`473c415`).
+- **Removal bug, caught by reading the code before running it.** When setup had created the disputes project, only the first 20 stored records would have been cleaned before the project was trashed, leaving orphaned records in app storage. Replaced with a paged sweep (`40753a9`).
 
 ### Verified live
 - The wizard completed all 11 steps with no errors: 60 disputes, 29 tickets, 3 incidents, 3 deploys.
@@ -203,7 +203,7 @@ Commits `73ed779` to `0e81677`.
 ## M2 platform spikes (overnight)
 
 ### Built
-- Confluence scopes and a Confluence install (`f092833`). A new platform check reads Confluence both as the app and as the admin; both pass.
+- Confluence scopes and a Confluence install (`1e1a595`). A new platform check reads Confluence both as the app and as the admin; both pass.
 
 ### Fixed
 - **S3 revisited.** REST project creation was tested again. Template `com.atlassian.servicedesk:simplified-finance-service-desk` creates a real, company-managed service desk that the service desk API lists. The earlier shell project came from the wrong template key, not from a platform limit. Company-managed software projects come from `gh-simplified-kanban-classic`. Throwaway test projects were moved to the trash.
@@ -221,7 +221,7 @@ Commits `73ed779` to `0e81677`.
 
 ### Built
 - A Dispute work type and an "Exhibita dispute workflow" (New, Collecting evidence, Ready to submit, Submitted, Won, Lost, Accepted) on DSP. The statuses, workflow, work type and scheme mapping were made through the REST API. Intake now picks Dispute automatically.
-- The validator was attached to "Submit to network" in the workflow editor, then read back through the API (spike S8, `6b1de68`).
+- The validator was attached to "Submit to network" in the workflow editor, then read back through the API (spike S8, `5d75d7e`).
 
 ### Broke
 - `POST /rest/api/3/workflows/create` rejected the request: "The reference new is not a UUID". Status references must be UUIDs.
@@ -229,7 +229,7 @@ Commits `73ed779` to `0e81677`.
 - **Integrity hole.** The pass case was tested by adding evidence to DSP-3's record, and that is exactly the problem: issue properties are writable by anyone who can edit the work item, so evidence could be typed in by hand to pass the gate.
 
 ### Fixed
-- D-11 (`48a7d9f`, `e5b3031`). The authoritative record lives in Forge app storage under `record:{issueId}`, which only the app can write. The issue property `exhibita` is a mirror for JQL and display. The panel, validator and agent actions read only the stored copy. A mirror that differs is flagged "Record edited outside Exhibita"; a mirror with no stored record is "unverified" and never evaluated, so submission stays blocked. A resent webhook restores the stored record from the authenticated payload. The new `reconcileRecord` tests failed before the change.
+- D-11 (`efbf8a7`, `caaf650`). The authoritative record lives in Forge app storage under `record:{issueId}`, which only the app can write. The issue property `exhibita` is a mirror for JQL and display. The panel, validator and agent actions read only the stored copy. A mirror that differs is flagged "Record edited outside Exhibita"; a mirror with no stored record is "unverified" and never evaluated, so submission stays blocked. A resent webhook restores the stored record from the authenticated payload. The new `reconcileRecord` tests failed before the change.
 
 ### Verified live
 - DSP-3 with no evidence: "Submit to network" fails in the UI and over REST with "Evidence incomplete (0 of 2 required). Add: Proof of delivery to the customer's address; No refund is still owed to the customer". With both exhibits on the record, it passes and moves to Submitted.
@@ -244,12 +244,12 @@ Commits `73ed779` to `0e81677`.
 ## 26 Nov 2026 (evening): first deploy and live run
 
 ### Built
-- Registered the app in the Developer Space (`1298048`), deployed to development, and installed on the demo site.
-- Setup page actions to create the disputes project and put the admin in its Administrators and Service Desk Team roles (`ef2b4a3`).
+- Registered the app in the Developer Space (`1fb3d02`), deployed to development, and installed on the demo site.
+- Setup page actions to create the disputes project and put the admin in its Administrators and Service Desk Team roles (`99a49de`).
 - Live spikes S1, S2, S4, S5, S10 (published from a resolver) and S11 pass ([SPIKES.md](SPIKES.md)). For S4: GET returns 405, no secret 503, a wrong secret 401, a good post 202, and the consumer creates the work item with the record attached.
 
 ### Broke
-- **Deploy, twice** (`a298655`):
+- **Deploy, twice** (`887731d`):
   1. "TypeScript emitted no output". ts-loader emits nothing when tsconfig sets `noEmit`. Removed it; the `typecheck` script still passes `--noEmit`.
   2. "Can't resolve './intake/consumer.js'". Forge's webpack config does not map `.js` import paths to `.ts` files. Relative imports are now extensionless, which both Bundler resolution and Vitest accept.
 - **Setup page stuck on a loading skeleton**, with "Failed to open iframe bridge: Handshake timeout" in the console. Forge serves app UIs from per-app hosts under `*.cdn.prod.atlassian-dev.net`, and the local DNS resolver answered `REFUSED` for them, so the UI frame never loaded. Public resolvers answered normally.
@@ -264,12 +264,12 @@ Commits `73ed779` to `0e81677`.
 
 ### Fixed
 - Pointed the machine and browser at public DNS. Ordinary networks are not affected, but the demo machine must use public DNS.
-- Added project setup (`ef2b4a3`), and named the Teamwork Graph query `exhibita_platformCheck` (`ef2b4a3`).
-- `chooseWorkType` never picks epics or subtasks and prefers Dispute, Service request or Task; its 5 new tests fail against the old pick (`857f8ae`).
-- The manifest indexes `dispute.externalId` (alias `exhibitaDisputeId`), and the consumer records each dispute id in KVS, which is read-your-writes, before falling back to JQL. Values in JQL are now quoted safely (`857f8ae`).
-- Role setup for the admin (`ef2b4a3`).
-- Deleted the shell project with the site owner's approval and recreated DSP from Jira's UI using the Finance service management template, company-managed so that Forge workflow validators apply. The "Exhibita evidence" panel then appeared and rendered the live rubric: Investigate, 0 of 2 required (Insufficient evidence), submit blocked with both missing items named (S5, `bc9742c`).
-- The consumer checks that the recorded work item still exists before trusting the marker (`3f99cc5`).
+- Added project setup (`99a49de`), and named the Teamwork Graph query `exhibita_platformCheck` (`99a49de`).
+- `chooseWorkType` never picks epics or subtasks and prefers Dispute, Service request or Task; its 5 new tests fail against the old pick (`54cbca9`).
+- The manifest indexes `dispute.externalId` (alias `exhibitaDisputeId`), and the consumer records each dispute id in KVS, which is read-your-writes, before falling back to JQL. Values in JQL are now quoted safely (`54cbca9`).
+- Role setup for the admin (`99a49de`).
+- Deleted the shell project with the site owner's approval and recreated DSP from Jira's UI using the Finance service management template, company-managed so that Forge workflow validators apply. The "Exhibita evidence" panel then appeared and rendered the live rubric: Investigate, 0 of 2 required (Insufficient evidence), submit blocked with both missing items named (S5, `49cc631`).
+- The consumer checks that the recorded work item still exists before trusting the marker (`8cf4549`).
 
 ### Result
 - The M1 slice runs live: webhook, queue, work item, panel. The workflow validator was next.
@@ -283,17 +283,17 @@ Commits `73ed779` to `0e81677`.
 ## 26 Nov 2026 (day): foundations
 
 ### Built
-- **Docs first.** Product spec, architecture, ten decision records (D-01 to D-10), a short list of invariants every change must keep, and a six-milestone roadmap with feature freeze on 15 Dec (`0ebcdce`, `ca28e80`, `d40ec19`).
-- **TypeScript in strict mode with Vitest** (`03f67a2`, D-09), with unchecked index access, because the evidence model is full of string states where a typo is a silent wrong verdict.
+- **Docs first.** Product spec, architecture, ten decision records (D-01 to D-10), a short list of invariants every change must keep, and a six-milestone roadmap with feature freeze on 15 Dec (`0ebcdce`, `bf9861c`, `8901e92`).
+- **TypeScript in strict mode with Vitest** (`0c2f567`, D-09), with unchecked index access, because the evidence model is full of string states where a typo is a silent wrong verdict.
 - **Deterministic core** (D-01), all pure and tested without Forge:
-  - Reason-code rubrics and Fight, Accept or Investigate triage for five reasons: item not received, not as described, charged twice, card-not-present fraud, and a cancelled-subscription stub (`a8e9246`). A refund approved but never completed concedes the case; one only initiated leads to Investigate. A test fails if anything resembling a win percentage appears (D-08).
-  - A webhook normaliser for Stripe-compatible dispute payloads that checks every field (`0957dc9`).
-  - A negation-aware phrase lexicon for customer text, with no model and no network call (`f442bc9`, D-02).
+  - Reason-code rubrics and Fight, Accept or Investigate triage for five reasons: item not received, not as described, charged twice, card-not-present fraud, and a cancelled-subscription stub (`7022e40`). A refund approved but never completed concedes the case; one only initiated leads to Investigate. A test fails if anything resembling a win percentage appears (D-08).
+  - A webhook normaliser for Stripe-compatible dispute payloads that checks every field (`e2317d5`).
+  - A negation-aware phrase lexicon for customer text, with no model and no network call (`7a506ff`, D-02).
   - 66 tests at this point.
-- Later the same day: the evidence red team (`8f208bd`), clustering and blast radius (`589d575`), the ten-case validation suite that runs both in tests and in the app (`120d906`), the webhook intake through a queue (`8649968`), the workflow validator (`5c6c54c`), the issue panel (`af2d2d9`), the setup page with platform checks (`43093a6`), and the Exhibita Analyst agent with two read-only GET actions for Rovo and MCP (`885b427`, D-06).
+- Later the same day: the evidence red team (`52efe19`), clustering and blast radius (`278765d`), the ten-case validation suite that runs both in tests and in the app (`f428aec`), the webhook intake through a queue (`179f394`), the workflow validator (`f3a3813`), the issue panel (`a9c1c3b`), the setup page with platform checks (`812fee7`), and the Exhibita Analyst agent with two read-only GET actions for Rovo and MCP (`b52e221`, D-06).
 
 ### Learned
-- **Fifteen platform facts checked against the Forge docs** before writing Forge code (SPIKES part 1, `d634b7e`). All three load-bearing assumptions held: function keys are 23 characters at most, Automation runs only GET actions, and a backend cannot read a Rovo reply. New find: Jira's experimental agents API can *start* an agent on issues, now spike S13.
+- **Fifteen platform facts checked against the Forge docs** before writing Forge code (SPIKES part 1, `0ed1847`). All three load-bearing assumptions held: function keys are 23 characters at most, Automation runs only GET actions, and a backend cannot read a Rovo reply. New find: Jira's experimental agents API can *start* an agent on issues, now spike S13.
 - **Package majors had moved** well past the early scaffold (`@forge/api` 8, `@forge/bridge` 7, `@forge/react` 12), so every API call was checked against the installed type definitions rather than older examples.
 - Chose an end-to-end slice before widening each layer (D-10).
 
