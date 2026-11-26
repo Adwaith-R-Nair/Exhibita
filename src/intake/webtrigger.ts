@@ -1,10 +1,10 @@
-// Web trigger: receives processor dispute webhooks, checks the shared secret, replies fast, and queues
+// Web trigger: receives processor dispute webhooks, verifies their signature, replies fast, and queues
 // the real work. The raw body is passed through unchanged so it can be kept for audit.
 
 import type { WebTriggerRequest, WebTriggerResponse } from '@forge/api';
 import { Queue } from '@forge/events';
-import { timingSafeEqual } from 'node:crypto';
 import { normalizeDisputeEvent } from '../core/intake/normalize';
+import { verifySignature } from '../core/intake/signature';
 import { getWebhookSecret } from '../lib/config';
 
 export const INTAKE_QUEUE = 'exhibita-intake';
@@ -15,19 +15,17 @@ const reply = (statusCode: number, body: Record<string, unknown>): WebTriggerRes
   body: JSON.stringify(body),
 });
 
-function sameSecret(given: string | undefined, expected: string): boolean {
-  if (!given) return false;
-  const a = Buffer.from(given);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
+/** Header names are case-insensitive; Forge passes them lower-cased. Stripe's own name is accepted too. */
+const signatureHeader = (headers: Record<string, string[] | undefined>) =>
+  headers['x-exhibita-signature']?.[0] ?? headers['stripe-signature']?.[0];
 
 export async function handleIntake(request: WebTriggerRequest): Promise<WebTriggerResponse> {
   if (request.method !== 'POST') return reply(405, { error: 'method-not-allowed' });
 
   const expected = await getWebhookSecret();
   if (!expected) return reply(503, { error: 'not-configured', detail: 'Create a webhook secret on the Exhibita setup page first.' });
-  if (!sameSecret(request.headers['x-exhibita-secret']?.[0], expected)) return reply(401, { error: 'bad-secret' });
+  const check = verifySignature(signatureHeader(request.headers), request.body, expected, Math.floor(Date.now() / 1000));
+  if (!check.ok) return reply(401, { error: check.reason });
 
   let payload: unknown;
   try {
