@@ -28,7 +28,11 @@ interface ClusterActions {
   refundsQueued?: { at: string; by: string; count: number; trackingKey: string | null };
   costBug?: { at: string; by: string; key: string };
 }
-const actionsKey = (incidentKey: string) => `cluster:${incidentKey}`;
+/**
+ * Keyed by the incident's issue id, not its key: a rebuilt demo can reuse the key INC-1 for a new issue,
+ * and its cluster must not inherit the old one's actions (found live, 27 Nov).
+ */
+const actionsKey = (incidentId: string) => `cluster:${incidentId}`;
 
 interface IssueInfo {
   id: string;
@@ -82,14 +86,25 @@ async function loadCases(): Promise<{ cases: DisputeCase[]; issues: Map<string, 
   return { cases, issues };
 }
 
-async function titlesOf(keys: readonly string[]): Promise<Map<string, string>> {
-  if (keys.length === 0) return new Map();
-  const found = await searchIssues(`key in (${keys.map(quote).join(', ')})`);
-  return new Map(found.map((f) => [f.key, f.summary]));
+/**
+ * Id and title of each issue, read directly rather than through search: the search index can lag behind
+ * issues created moments ago, which left the page without titles right after a rebuild.
+ */
+async function issuesByKey(keys: readonly string[]): Promise<Map<string, { id: string; summary: string }>> {
+  const found = await Promise.all(
+    keys.map(async (key) => {
+      const res = await api.asApp().requestJira(route`/rest/api/3/issue/${key}?fields=summary`, { headers: JSON_HEADERS });
+      if (!res.ok) return null;
+      const body = (await res.json()) as { id: string; fields: { summary?: string } };
+      return [key, { id: body.id, summary: body.fields.summary ?? key }] as const;
+    }),
+  );
+  return new Map(found.filter((f): f is NonNullable<typeof f> => f !== null));
 }
 
 export interface ClusterView {
   cluster: Cluster;
+  incidentId: string;
   blast: BlastRadius;
   plan: ClusterPlan;
   incidentTitle: string | null;
@@ -110,13 +125,15 @@ export interface SystemicView {
 async function buildClusters(): Promise<{ views: ClusterView[]; cases: DisputeCase[] }> {
   const { cases, issues } = await loadCases();
   const clusters = clusterDisputes(cases);
-  const titles = await titlesOf([...new Set(clusters.flatMap((c) => [c.incidentKey, ...(c.deployKey ? [c.deployKey] : [])]))]);
+  const linked = await issuesByKey([...new Set(clusters.flatMap((c) => [c.incidentKey, ...(c.deployKey ? [c.deployKey] : [])]))]);
   const views = await Promise.all(
     clusters.map(async (cluster): Promise<ClusterView> => {
       const affected = (await affectedOrdersFor(cluster.incidentKey)).map((o) => ({ ...o, amount: minor(o.amount) }));
       const blast = blastRadius(cluster, affected, { disputeFee: minor(DISPUTE_FEE_MINOR), analystMinutesPerDispute: ANALYST_MINUTES_PER_DISPUTE });
-      const incidentTitle = titles.get(cluster.incidentKey) ?? null;
-      const deployTitle = cluster.deployKey ? (titles.get(cluster.deployKey) ?? null) : null;
+      const incident = linked.get(cluster.incidentKey);
+      const incidentId = incident?.id ?? cluster.incidentKey;
+      const incidentTitle = incident?.summary ?? null;
+      const deployTitle = cluster.deployKey ? (linked.get(cluster.deployKey)?.summary ?? null) : null;
       const plan = planClusterActions(cluster, cases, blast, { ...(incidentTitle ? { incidentTitle } : {}), ...(deployTitle ? { deployTitle } : {}) });
       const disputes = cluster.disputes.map((d) => {
         const info = issues.get(d.issueKey);
@@ -124,13 +141,14 @@ async function buildClusters(): Promise<{ views: ClusterView[]; cases: DisputeCa
       });
       return {
         cluster,
+        incidentId,
         blast,
         plan,
         incidentTitle,
         deployTitle,
         disputes,
         openToAccept: disputes.filter((d) => !d.done).length,
-        actions: (await kvs.get<ClusterActions>(actionsKey(cluster.incidentKey))) ?? {},
+        actions: (await kvs.get<ClusterActions>(actionsKey(incidentId))) ?? {},
         queuedRefunds: await queuedRefundCount(cluster.incidentKey),
         labels: { disputed: formatMoney(cluster.totals), cost: formatMoney(blast.disputeCostSoFar), owed: formatMoney(blast.proactiveRefundTotals) },
       };
@@ -190,9 +208,9 @@ export async function acceptClusterStep(incidentKey: string, accountId: string):
   }
   const remaining = open.length - batch.length;
   if (remaining === 0) {
-    const actions = (await kvs.get<ClusterActions>(actionsKey(incidentKey))) ?? {};
+    const actions = (await kvs.get<ClusterActions>(actionsKey(view.incidentId))) ?? {};
     actions.accepted = { at: new Date().toISOString(), by: accountId, count: view.plan.accept.length };
-    await kvs.set(actionsKey(incidentKey), actions);
+    await kvs.set(actionsKey(view.incidentId), actions);
   }
   return { accepted, remaining };
 }
@@ -219,9 +237,9 @@ async function relate(fromKey: string, toKey: string): Promise<void> {
 
 /** Queue refunds for the affected customers who have not disputed, with one tracking work item. */
 export async function queueClusterRefunds(incidentKey: string, accountId: string): Promise<{ count: number; trackingKey: string | null }> {
-  const actions = (await kvs.get<ClusterActions>(actionsKey(incidentKey))) ?? {};
-  if (actions.refundsQueued) return { count: actions.refundsQueued.count, trackingKey: actions.refundsQueued.trackingKey };
   const view = await clusterView(incidentKey);
+  const actions = view.actions;
+  if (actions.refundsQueued) return { count: actions.refundsQueued.count, trackingKey: actions.refundsQueued.trackingKey };
   const orders = view.plan.proactive;
   const sources = await getSources();
   const projectKey = sources.ticketProjectKey ?? (await getConfig()).projectKey;
@@ -253,15 +271,15 @@ export async function queueClusterRefunds(incidentKey: string, accountId: string
   await queueProactiveRefunds(incidentKey, orders, accountId, trackingKey);
   await relate(incidentKey, trackingKey);
   actions.refundsQueued = { at: new Date().toISOString(), by: accountId, count: orders.length, trackingKey };
-  await kvs.set(actionsKey(incidentKey), actions);
+  await kvs.set(actionsKey(view.incidentId), actions);
   return { count: orders.length, trackingKey };
 }
 
 /** File the cost bug on the deploy (or the incident when no deploy is linked). */
 export async function fileCostBug(incidentKey: string, accountId: string): Promise<{ key: string }> {
-  const actions = (await kvs.get<ClusterActions>(actionsKey(incidentKey))) ?? {};
-  if (actions.costBug) return { key: actions.costBug.key };
   const view = await clusterView(incidentKey);
+  const actions = view.actions;
+  if (actions.costBug) return { key: actions.costBug.key };
   const sources = await getSources();
   const culprit = view.cluster.deployKey ?? incidentKey;
   const projectKey = (view.cluster.deployKey ? sources.deployProjectKey : sources.incidentProjectKey) ?? culprit.split('-')[0]!;
@@ -275,6 +293,6 @@ export async function fileCostBug(incidentKey: string, accountId: string): Promi
   await relate(culprit, key);
   if (culprit !== incidentKey) await relate(incidentKey, key);
   actions.costBug = { at: new Date().toISOString(), by: accountId, key };
-  await kvs.set(actionsKey(incidentKey), actions);
+  await kvs.set(actionsKey(view.incidentId), actions);
   return { key };
 }
