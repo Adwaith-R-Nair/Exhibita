@@ -13,6 +13,7 @@ import ForgeReconciler, {
   Text,
   Tooltip,
 } from '@forge/react';
+import { realtime } from '@forge/bridge';
 import { call } from './call';
 import type { Finding } from '../core/challenge/challenge';
 import { COPY_CHANGED_MESSAGE, UNTRUSTED_RECORD_MESSAGE } from '../core/record';
@@ -33,6 +34,7 @@ type PanelState =
   | {
       state: 'ready';
       issueKey: string;
+      issueId: string | null;
       copyChanged: boolean;
       dispute: Dispute;
       evidence: EvidenceItem[];
@@ -61,6 +63,17 @@ const SEVERITY = {
   weakens: { text: 'Weakens', appearance: 'moved' },
   note: { text: 'Note', appearance: 'default' },
 } as const;
+
+/** What the collector is reading, as the panel says it while evidence arrives. */
+const STAGE_TEXT: Record<string, string> = {
+  order: 'Read the order and payment records',
+  tickets: 'Read the customer\'s support tickets',
+  refunds: 'Read refunds and incident impacts',
+  incidents: 'Read incidents and deploys',
+  policies: 'Reading policies',
+};
+
+const EVIDENCE_CHANNEL = 'exhibita-evidence';
 
 const EVIDENCE_LABEL: Record<string, string> = {
   delivery: 'Delivery',
@@ -128,12 +141,33 @@ function App() {
   const [data, setData] = useState<PanelState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState<string | null>(null);
+  const issueId = data?.state === 'ready' ? data.issueId : null;
 
   useEffect(() => {
     call<PanelState>('getEvaluation')
       .then(setData)
       .catch((e: unknown) => setError(String(e)));
   }, []);
+
+  // Evidence arrives source by source; refresh as each one lands (spec 5.3).
+  useEffect(() => {
+    if (!issueId) return;
+    const sub = realtime.subscribeGlobal(EVIDENCE_CHANNEL, (message: string | Record<string, unknown>) => {
+      let event: { issueId?: string; stage?: string } = {};
+      try {
+        event = (typeof message === 'string' ? JSON.parse(message) : message) as typeof event;
+      } catch {
+        return;
+      }
+      if (event.issueId !== issueId) return;
+      setStage(event.stage === 'done' ? null : (event.stage ?? null));
+      call<PanelState>('getEvaluation').then(setData).catch(() => undefined);
+    });
+    return () => {
+      void sub.then((s) => s.unsubscribe());
+    };
+  }, [issueId]);
 
   const collectAgain = async () => {
     setBusy(true);
@@ -179,6 +213,11 @@ function App() {
 
   return (
     <Stack space="space.200">
+      {(stage || !data.collectedAt) && (
+        <SectionMessage appearance="information" title="Collecting evidence">
+          <Text>{stage ? `${STAGE_TEXT[stage] ?? stage}. More sources to come.` : 'Evidence is being collected from the sources.'}</Text>
+        </SectionMessage>
+      )}
       {data.copyChanged && (
         <SectionMessage appearance="warning" title="Record edited outside Exhibita">
           <Text>{COPY_CHANGED_MESSAGE}</Text>

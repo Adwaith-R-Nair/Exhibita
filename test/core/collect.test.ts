@@ -400,3 +400,18 @@ describe('customer messages', () => {
     ]);
   });
 });
+
+describe('collecting source by source', () => {
+  it('never records an absence for a source that has not been read yet', () => {
+    const unread = collectEvidence(input('visa-13.1', { refunds: [], tickets: [], pending: ['refunds', 'tickets'] }));
+    expect(unread.some((e) => e.type === 'refund')).toBe(false);
+    expect(unread.some((e) => e.type === 'customer-message')).toBe(false);
+    const read = collectEvidence(input('visa-13.1', { refunds: [], tickets: [] }));
+    expect(read.find((e) => e.type === 'refund')?.state).toBe('none');
+  });
+
+  it('keeps evidence from the sources already read', () => {
+    const partial = collectEvidence(input('visa-13.1', { pending: ['refunds', 'tickets', 'incidents', 'policies'] }));
+    expect(partial.some((e) => e.type === 'delivery')).toBe(true);
+  });
+});

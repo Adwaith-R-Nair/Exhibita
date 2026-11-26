@@ -8,7 +8,20 @@ import api, { route } from '@forge/api';
 import { kvs } from '@forge/kvs';
 import { adfToText } from '../core/sources/adf';
 import { stripMessageHeader } from '../core/sources/ticket-text';
-import type { CollectInput, IncidentEffect, ObservedIncident, ObservedRefund, ObservedTicket, TicketMessage } from '../core/sources/types';
+import type { StoredImpact } from '../core/sources/codec';
+import {
+  COLLECT_SOURCES,
+  type ChargeRow,
+  type CollectInput,
+  type CollectSource,
+  type IncidentEffect,
+  type ObservedIncident,
+  type ObservedRefund,
+  type ObservedTicket,
+  type PriorOrder,
+  type ProductRow,
+  type TicketMessage,
+} from '../core/sources/types';
 import type { Dispute } from '../core/types';
 import { readPolicyVersions } from './confluence';
 import { JiraError } from './jira';
@@ -157,55 +170,103 @@ const overlaps = (purchasedAt: string, start: string, end: string | null) => {
   return t >= Date.parse(start) && (end === null || t <= Date.parse(end));
 };
 
-export async function buildCollectInput(dispute: Dispute, disputesProjectKey: string): Promise<CollectInput> {
+/** Called after each source is read, with everything read so far and the sources still to come. */
+export type OnStage = (input: CollectInput, stage: CollectSource) => Promise<void>;
+
+/**
+ * Read the dispute's sources one at a time, in COLLECT_SOURCES order. After each, the input is rebuilt
+ * from everything read so far, with the rest marked pending, so a caller can show evidence arriving
+ * without ever treating an unread source as empty.
+ */
+export async function buildCollectInput(dispute: Dispute, disputesProjectKey: string, onStage?: OnStage): Promise<CollectInput> {
   const sources = await getSources();
   const base = await siteUrl();
   const order = dispute.orderId ? await getOrder(dispute.orderId) : null;
-  const empty: CollectInput = { dispute, order: null, product: null, charges: [], refunds: [], priorOrders: [], tickets: [], incidents: [], policies: [] };
-  const policies = (await Promise.all(sources.policyPageIds.map((id) => readPolicyVersions(id, base).catch(() => [])))).flat();
-  if (!order) return { ...empty, policies };
 
-  const customerId = order.customerId;
-  const disputedCharge = dispute.chargeId ? await getCharge(dispute.chargeId) : null;
-  const [product, charges, refundRows, ticketData, allIncidents, disputed] = await Promise.all([
-    getProduct(order.sku),
-    getChargesFor(order, dispute.amount, disputedCharge?.chargedAt ?? order.purchasedAt),
-    getRefundsFor(order.id),
-    readTickets(sources, customerId, base),
-    readIncidents(sources, base),
-    disputedOrders(disputesProjectKey, customerId),
-  ]);
-  // Only this order's refunds and charges count; a look-alike charge on another order is not this dispute.
-  const orderCharges = charges.filter((c) => c.orderId === order.id).map((c) => c.id);
-  const impacts = await getImpacts(refundRows.map((r) => r.id), orderCharges);
-  const priorOrders = await getPriorOrders(order, disputed);
-  const incidentByKey = new Map(allIncidents.map((i) => [i.key, i]));
+  // Everything read so far.
+  let product: ProductRow | null = null;
+  let charges: ChargeRow[] = [];
+  let priorOrders: PriorOrder[] = [];
+  let ticketData: Awaited<ReturnType<typeof readTickets>> = { tickets: [], incidentByRefund: new Map() };
+  let refundRows: Awaited<ReturnType<typeof getRefundsFor>> = [];
+  let impacts: StoredImpact[] = [];
+  let allIncidents: Awaited<ReturnType<typeof readIncidents>> = [];
+  let policies: CollectInput['policies'] = [];
 
-  const refunds: ObservedRefund[] = refundRows.map((r) => {
-    const fromImpact = impacts.find((i) => i.refundId === r.id)?.incidentKey ?? null;
-    const fromTicket = ticketData.incidentByRefund.get(r.id) ?? null;
-    const linkedIncident = fromImpact ?? fromTicket;
-    const ticketUrl = r.ticketKey ? browse(base, r.ticketKey) : undefined;
+  const assemble = (done: number): CollectInput => {
+    const pending = COLLECT_SOURCES.slice(done + 1);
+    const incidentByKey = new Map(allIncidents.map((i) => [i.key, i]));
+    const refunds: ObservedRefund[] = refundRows.map((r) => {
+      const fromImpact = impacts.find((i) => i.refundId === r.id)?.incidentKey ?? null;
+      const fromTicket = ticketData.incidentByRefund.get(r.id) ?? null;
+      const linkedIncident = fromImpact ?? fromTicket;
+      const ticketUrl = r.ticketKey ? browse(base, r.ticketKey) : undefined;
+      return {
+        ...r,
+        linkedIncident,
+        linkedDeploy: linkedIncident ? (incidentByKey.get(linkedIncident)?.linkedDeploy ?? null) : null,
+        ticketKey: r.ticketKey,
+        ...(ticketUrl ? { ticketUrl } : {}),
+      };
+    });
+    const explicit = new Set<string>([...impacts.map((i) => i.incidentKey), ...refunds.map((r) => r.linkedIncident).filter((k): k is string => !!k)]);
+    const incidents: ObservedIncident[] = order
+      ? allIncidents
+          .flatMap((i): ObservedIncident[] => {
+            if (explicit.has(i.key)) return [{ ...i, link: 'explicit' as const }];
+            if (overlaps(order.purchasedAt, i.windowStart, i.windowEnd)) return [{ ...i, link: 'none' as const }];
+            return [];
+          })
+          .sort(byTimeThenKey((i) => i.windowStart, (i) => i.key))
+      : [];
     return {
-      ...r,
-      linkedIncident,
-      linkedDeploy: linkedIncident ? (incidentByKey.get(linkedIncident)?.linkedDeploy ?? null) : null,
-      ticketKey: r.ticketKey,
-      ...(ticketUrl ? { ticketUrl } : {}),
+      dispute,
+      order,
+      product,
+      charges,
+      refunds,
+      priorOrders,
+      tickets: ticketData.tickets,
+      incidents,
+      policies,
+      ...(pending.length > 0 ? { pending } : {}),
     };
-  });
+  };
 
-  const explicit = new Set<string>([
-    ...impacts.map((i) => i.incidentKey),
-    ...refunds.map((r) => r.linkedIncident).filter((k): k is string => !!k),
-  ]);
-  const incidents: ObservedIncident[] = allIncidents
-    .flatMap((i): ObservedIncident[] => {
-      if (explicit.has(i.key)) return [{ ...i, link: 'explicit' as const }];
-      if (overlaps(order.purchasedAt, i.windowStart, i.windowEnd)) return [{ ...i, link: 'none' as const }];
-      return [];
-    })
-    .sort(byTimeThenKey((i) => i.windowStart, (i) => i.key));
+  const readers: Record<CollectSource, () => Promise<void>> = {
+    async order() {
+      if (!order) return;
+      const disputedCharge = dispute.chargeId ? await getCharge(dispute.chargeId) : null;
+      const [p, c, disputed] = await Promise.all([
+        getProduct(order.sku),
+        getChargesFor(order, dispute.amount, disputedCharge?.chargedAt ?? order.purchasedAt),
+        disputedOrders(disputesProjectKey, order.customerId),
+      ]);
+      product = p;
+      charges = c;
+      priorOrders = await getPriorOrders(order, disputed);
+    },
+    async tickets() {
+      if (order) ticketData = await readTickets(sources, order.customerId, base);
+    },
+    async refunds() {
+      if (!order) return;
+      refundRows = await getRefundsFor(order.id);
+      // Only this order's refunds and charges count; a look-alike charge on another order is not this dispute.
+      const orderCharges = charges.filter((c) => c.orderId === order.id).map((c) => c.id);
+      impacts = await getImpacts(refundRows.map((r) => r.id), orderCharges);
+    },
+    async incidents() {
+      if (order) allIncidents = await readIncidents(sources, base);
+    },
+    async policies() {
+      policies = (await Promise.all(sources.policyPageIds.map((id) => readPolicyVersions(id, base).catch(() => [])))).flat();
+    },
+  };
 
-  return { dispute, order, product, charges, refunds, priorOrders, tickets: ticketData.tickets, incidents, policies };
+  for (const [i, stage] of COLLECT_SOURCES.entries()) {
+    await readers[stage]();
+    if (onStage && i < COLLECT_SOURCES.length - 1) await onStage(assemble(i), stage);
+  }
+  return assemble(COLLECT_SOURCES.length - 1);
 }

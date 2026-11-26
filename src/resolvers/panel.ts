@@ -14,13 +14,15 @@ const issueOf = (context: unknown) => {
   return { key: issue?.key, id: issue?.id !== undefined ? String(issue.id) : undefined };
 };
 
-async function view(issueKey: string, issueId?: string) {
+async function view(issueKey: string, givenId?: string) {
+  const issueId = givenId ?? (await getIssueId(issueKey)) ?? undefined;
   const loaded = await evaluateIssue(issueKey, issueId);
   if (loaded.trust === 'unverified') return { state: 'unverified' as const, issueKey };
   if (!loaded.record) return { state: 'not-a-dispute' as const, issueKey };
   return {
     state: 'ready' as const,
     issueKey,
+    issueId: issueId ?? null,
     copyChanged: loaded.trust === 'copy-changed',
     dispute: loaded.record.dispute,
     evidence: loaded.record.evidence,

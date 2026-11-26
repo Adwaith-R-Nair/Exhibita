@@ -14,7 +14,7 @@
 
 import { classifyMessage, type MessageLabel } from '../classify/lexicon';
 import { findReason } from '../rubric/reasons';
-import type { ChargeRow, CollectInput, ObservedIncident, ObservedRefund, OrderRow } from '../sources/types';
+import type { ChargeRow, CollectInput, CollectSource, ObservedIncident, ObservedRefund, OrderRow } from '../sources/types';
 import type { EvidenceItem, EvidenceType, ReasonKey } from '../types';
 
 const DAY_MS = 86_400_000;
@@ -387,6 +387,24 @@ const COLLECTORS: readonly ((ctx: Context) => EvidenceItem[])[] = [
   customerMessages,
 ];
 
+/** Which system each evidence type is read from, so unread sources contribute nothing. */
+const SOURCE_OF: Record<EvidenceType, CollectSource> = {
+  delivery: 'order',
+  'delivery-signature': 'order',
+  'product-description': 'order',
+  'order-pair': 'order',
+  '3ds': 'order',
+  avs: 'order',
+  cvv: 'order',
+  'prior-orders': 'order',
+  cancellation: 'order',
+  'customer-message': 'tickets',
+  refund: 'refunds',
+  incident: 'incidents',
+  deploy: 'incidents',
+  policy: 'policies',
+};
+
 export function collectEvidence(input: CollectInput): EvidenceItem[] {
   const reason = findReason(input.dispute.reasonCode)?.key ?? null;
   const ctx: Context = {
@@ -396,6 +414,8 @@ export function collectEvidence(input: CollectInput): EvidenceItem[] {
     customerId: input.dispute.customer ?? input.order?.customerId ?? null,
   };
   const relevant = (e: EvidenceItem) => reason === null || !ONLY_FOR[e.type] || ONLY_FOR[e.type]!.includes(reason);
+  const pending = new Set(input.pending ?? []);
+  const read = (e: EvidenceItem) => !pending.has(SOURCE_OF[e.type]);
   // Collector order, then each collector's own sort, gives a stable exhibit order.
-  return COLLECTORS.flatMap((collect) => collect(ctx)).filter(relevant);
+  return COLLECTORS.flatMap((collect) => collect(ctx)).filter(relevant).filter(read);
 }

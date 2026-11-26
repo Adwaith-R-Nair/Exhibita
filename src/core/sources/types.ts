@@ -272,7 +272,16 @@ export interface PriorOrder {
   disputed: boolean;
 }
 
+/** The systems a dispute's evidence is read from, in the order the live collector reads them. */
+export const COLLECT_SOURCES = ['order', 'tickets', 'refunds', 'incidents', 'policies'] as const;
+export type CollectSource = (typeof COLLECT_SOURCES)[number];
+
 export interface CollectInput {
+  /**
+   * Sources not read yet. Their lists are empty but mean "unknown", not "none", so no evidence (and
+   * in particular no recorded absence) may come from them. Omitted when everything has been read.
+   */
+  pending?: readonly CollectSource[];
   dispute: Dispute;
   order: OrderRow | null;
   product: ProductRow | null;
