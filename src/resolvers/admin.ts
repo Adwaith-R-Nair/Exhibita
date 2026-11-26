@@ -1,6 +1,6 @@
 // Backend for the Exhibita setup page: configuration, webhook secret, and platform checks.
 
-import api, { webTrigger } from '@forge/api';
+import api, { route, webTrigger } from '@forge/api';
 import { kvs } from '@forge/kvs';
 import { publishGlobal } from '@forge/realtime';
 import Resolver from '@forge/resolver';
@@ -74,6 +74,13 @@ resolver.define('runChecks', async ({ context }) => {
     check('Realtime', async () => {
       await publishGlobal(SPIKE_CHANNEL, JSON.stringify({ at: Date.now() }));
       return 'published; the page shows whether it arrived';
+    }),
+    check('Confluence', async () => {
+      // Read as the app and as the admin: policy pages are written as the admin, read back as the app.
+      const asApp = await api.asApp().requestConfluence(route`/wiki/api/v2/spaces?limit=1`);
+      const asUser = await api.asUser().requestConfluence(route`/wiki/api/v2/spaces?limit=1`);
+      if (!asApp.ok || !asUser.ok) throw new Error(`as app HTTP ${asApp.status}, as you HTTP ${asUser.status}: ${(await (asApp.ok ? asUser : asApp).text()).slice(0, 200)}`);
+      return 'spaces readable as the app and as you';
     }),
     check('Teamwork Graph', async () => {
       const res = await api.asUser().requestTeamworkGraph('query exhibita_platformCheck { __typename }');

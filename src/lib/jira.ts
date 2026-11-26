@@ -43,9 +43,10 @@ export async function listProjects(as: Requester = api.asApp()): Promise<Project
 
 /** Service project templates to try, most fitting first. Sites differ in which ones they offer. */
 export const SERVICE_PROJECT_TEMPLATES = [
-  'com.atlassian.servicedesk:simplified-general-service-desk',
+  // Verified live (26 Nov): creates a company-managed service project with a real service desk.
+  // 'simplified-general-service-desk' looked accepted but built a shell project with no service desk.
+  'com.atlassian.servicedesk:simplified-finance-service-desk',
   'com.atlassian.servicedesk:simplified-it-service-management',
-  'com.atlassian.servicedesk:simplified-internal-service-desk',
 ] as const;
 
 /**

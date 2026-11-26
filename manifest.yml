@@ -147,6 +147,14 @@ permissions:
     - manage:jira-configuration
     - manage:jira-project
     - storage:app
+    # Confluence: the setup wizard writes the policy pages and the defense pack; collectors read policy versions.
+    - read:space:confluence
+    - write:space:confluence
+    - read:page:confluence
+    - write:page:confluence
+    - read:confluence-content.all
+    - write:confluence-content
+    - write:confluence-space
 
 # app.rovo metadata (tag, description, keywords) is required for rovo:mcp apps from 5 Jan 2027,
 # but CLI 16 / @forge/manifest 13.9.1 rejects it. Re-add once the schema accepts it. See docs/BUILD_LOG.md.
